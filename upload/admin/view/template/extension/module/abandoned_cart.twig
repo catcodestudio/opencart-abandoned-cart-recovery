@@ -1,0 +1,313 @@
+{{ header }}{{ column_left }}
+<div id="content">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="pull-right">
+        <a href="{{ carts }}" class="btn btn-info"><i class="fa fa-shopping-cart"></i> {{ heading_carts }}</a>
+        <button type="button" id="button-save" data-toggle="tooltip" title="{{ button_save }}" class="btn btn-primary"><i class="fa fa-save"></i></button>
+        <a href="{{ back }}" data-toggle="tooltip" title="{{ button_back }}" class="btn btn-default"><i class="fa fa-reply"></i></a>
+      </div>
+      <h1>{{ heading_title }}</h1>
+      <ul class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}<li><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>{% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="container-fluid">
+    <div id="alert-abandoned-cart"></div>
+
+    {% if crypto_broken %}
+      <div class="alert alert-warning"><i class="fa fa-exclamation-triangle"></i> {{ text_crypto_broken }}</div>
+    {% endif %}
+
+    {% if not is_pro %}
+      <div class="alert alert-info">{{ text_trial_over }}</div>
+    {% elseif not has_license and trial_active %}
+      <div class="alert alert-info">{{ text_trial_left|replace({'%s': trial_days_left}) }}</div>
+    {% endif %}
+
+    <div class="panel panel-default">
+      <div class="panel-heading"><h3 class="panel-title"><i class="fa fa-pencil"></i> {{ text_edit }}</h3></div>
+      <div class="panel-body">
+        <form id="form-abandoned-cart" class="form-horizontal">
+          <ul class="nav nav-tabs">
+            <li class="active"><a href="#tab-general" data-toggle="tab">{{ tab_general }}</a></li>
+            <li><a href="#tab-emails" data-toggle="tab">{{ tab_emails }}</a></li>
+            <li><a href="#tab-coupon" data-toggle="tab">{{ tab_coupon }}</a></li>
+            <li><a href="#tab-telegram" data-toggle="tab">{{ tab_telegram }}</a></li>
+            <li><a href="#tab-license" data-toggle="tab">{{ tab_license }}</a></li>
+          </ul>
+
+          <div class="tab-content">
+
+            <div class="tab-pane active" id="tab-general">
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_status }}</label>
+                <div class="col-sm-9">
+                  <select name="status" class="form-control">
+                    <option value="1"{{ status == '1' ? ' selected' : '' }}>{{ text_enabled }}</option>
+                    <option value="0"{{ status != '1' ? ' selected' : '' }}>{{ text_disabled }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_abandon_after }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="1" step="1" name="abandon_after" value="{{ abandon_after }}" class="form-control"/>
+                  <span class="help-block">{{ help_abandon_after }}</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_token_lifetime }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="1" step="1" name="token_lifetime" value="{{ token_lifetime }}" class="form-control"/>
+                  <span class="help-block">{{ help_token_lifetime }}</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_email_cooldown }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="0" step="1" name="email_cooldown" value="{{ email_cooldown }}" class="form-control"/>
+                  <span class="help-block">{{ help_email_cooldown }}</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_retention_days }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="0" step="1" name="retention_days" value="{{ retention_days }}" class="form-control"/>
+                  <span class="help-block">{{ help_retention_days }}</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_cron }}</label>
+                <div class="col-sm-9">
+                  <input type="text" value="{{ cron_url }}" readonly class="form-control"/>
+                  <span class="help-block">{{ help_cron }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-emails">
+              {% for n in 1..3 %}
+                {% set locked = n > 1 and not is_pro %}
+                <fieldset>
+                  <legend>
+                    {{ attribute(_context, 'legend_email_' ~ n) }}
+                    {% if n > 1 %}<span class="label label-primary">PRO</span>{% endif %}
+                  </legend>
+
+                  {% if n > 1 %}
+                    <div class="form-group">
+                      <label class="col-sm-3 control-label">{{ entry_enabled }}</label>
+                      <div class="col-sm-9">
+                        <select name="email_{{ n }}_enabled" class="form-control"{% if locked %} disabled{% endif %}>
+                          <option value="1"{{ attribute(_context, 'email_' ~ n ~ '_enabled') == '1' ? ' selected' : '' }}>{{ text_enabled }}</option>
+                          <option value="0"{{ attribute(_context, 'email_' ~ n ~ '_enabled') != '1' ? ' selected' : '' }}>{{ text_disabled }}</option>
+                        </select>
+                      </div>
+                    </div>
+                  {% endif %}
+
+                  <div class="form-group">
+                    <label class="col-sm-3 control-label">{% if n == 1 %}{{ entry_delay_first }}{% else %}{{ entry_delay_next }}{% endif %}</label>
+                    <div class="col-sm-9">
+                      <input type="number" min="1" step="1" name="email_{{ n }}_delay" value="{{ attribute(_context, 'email_' ~ n ~ '_delay') }}" class="form-control"{% if locked %} disabled{% endif %}/>
+                      <span class="help-block">{{ help_delay }}</span>
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="col-sm-3 control-label">{{ entry_subject }}</label>
+                    <div class="col-sm-9">
+                      <input type="text" name="email_{{ n }}_subject" value="{{ attribute(_context, 'email_' ~ n ~ '_subject') }}" class="form-control"{% if locked %} disabled{% endif %}/>
+                    </div>
+                  </div>
+
+                  <div class="form-group">
+                    <label class="col-sm-3 control-label">{{ entry_body }}</label>
+                    <div class="col-sm-9">
+                      <textarea name="email_{{ n }}_body" rows="10" class="form-control"{% if locked %} disabled{% endif %}>{{ attribute(_context, 'email_' ~ n ~ '_body') }}</textarea>
+                      <span class="help-block">
+                        {{ help_placeholders }}
+                        <code>{customer_name}</code> <code>{cart_items}</code> <code>{cart_total}</code>
+                        <code>{recovery_link}</code> <code>{store_name}</code> <code>{store_url}</code>
+                        <code>{coupon}</code> <code>{coupon_code}</code>
+                      </span>
+                    </div>
+                  </div>
+                </fieldset>
+              {% endfor %}
+            </div>
+
+            <div class="tab-pane" id="tab-coupon">
+              <div class="alert alert-info">{{ help_coupon_intro }} {% if not is_pro %}<strong>{{ text_pro_only }}</strong>{% endif %}</div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_coupon_enabled }}</label>
+                <div class="col-sm-9">
+                  <select name="coupon_enabled" class="form-control"{% if not is_pro %} disabled{% endif %}>
+                    <option value="1"{{ coupon_enabled == '1' ? ' selected' : '' }}>{{ text_enabled }}</option>
+                    <option value="0"{{ coupon_enabled != '1' ? ' selected' : '' }}>{{ text_disabled }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_coupon_type }}</label>
+                <div class="col-sm-9">
+                  <select name="coupon_type" class="form-control"{% if not is_pro %} disabled{% endif %}>
+                    <option value="P"{{ coupon_type == 'P' ? ' selected' : '' }}>{{ text_coupon_percent }}</option>
+                    <option value="F"{{ coupon_type == 'F' ? ' selected' : '' }}>{{ text_coupon_fixed }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_coupon_amount }}</label>
+                <div class="col-sm-9"><input type="text" name="coupon_amount" value="{{ coupon_amount }}" class="form-control"{% if not is_pro %} disabled{% endif %}/></div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_coupon_from }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="1" max="3" step="1" name="coupon_from_email" value="{{ coupon_from_email }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  <span class="help-block">{{ help_coupon_from }}</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_coupon_expiry }}</label>
+                <div class="col-sm-9"><input type="number" min="1" step="1" name="coupon_expiry_days" value="{{ coupon_expiry_days }}" class="form-control"{% if not is_pro %} disabled{% endif %}/></div>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-telegram">
+              <div class="alert alert-info">{{ help_telegram_intro }} {% if not is_pro %}<strong>{{ text_pro_only }}</strong>{% endif %}</div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_telegram_enabled }}</label>
+                <div class="col-sm-9">
+                  <select name="telegram_enabled" class="form-control"{% if not is_pro %} disabled{% endif %}>
+                    <option value="1"{{ telegram_enabled == '1' ? ' selected' : '' }}>{{ text_enabled }}</option>
+                    <option value="0"{{ telegram_enabled != '1' ? ' selected' : '' }}>{{ text_disabled }}</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_telegram_token }}</label>
+                <div class="col-sm-9">
+                  <input type="password" name="telegram_bot_token" value="" autocomplete="new-password" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  <span class="help-block">
+                    {% if telegram_bot_token_set %}<span class="text-success">{{ text_secret_stored }}</span> {% endif %}{{ help_telegram_token }}
+                  </span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_telegram_bot }}</label>
+                <div class="col-sm-9">
+                  <button type="button" id="button-connect-bot" class="btn btn-primary"{% if not is_pro %} disabled{% endif %}>{{ button_connect_bot }}</button>
+                  <button type="button" id="button-disconnect-bot" class="btn btn-default"{% if not is_pro %} disabled{% endif %}>{{ button_disconnect_bot }}</button>
+                  <span class="help-block">
+                    <span id="telegram-webhook-state" class="{% if telegram_webhook_set %}text-success{% else %}text-muted{% endif %}">
+                      {% if not telegram_webhook_set %}
+                        {{ text_webhook_off }}
+                      {% elseif telegram_chat_id %}
+                        {{ text_webhook_ready }}
+                      {% else %}
+                        {{ text_webhook_waiting }}
+                      {% endif %}
+                    </span>
+                    <br/>{{ help_telegram_webhook }}
+                  </span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_telegram_chat }}</label>
+                <div class="col-sm-9">
+                  <input type="text" name="telegram_chat_id" value="{{ telegram_chat_id }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  <span class="help-block">{{ help_telegram_chat }}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="tab-pane" id="tab-license">
+              <div class="form-group">
+                <label class="col-sm-3 control-label">{{ entry_license }}</label>
+                <div class="col-sm-9">
+                  <input type="password" name="license_key" value="" autocomplete="new-password" class="form-control"/>
+                  <span class="help-block">
+                    {% if has_license %}
+                      <span class="text-success">{{ text_license_active }}</span>
+                    {% elseif trial_active %}
+                      <span class="text-success">{{ text_trial_left|replace({'%s': trial_days_left}) }}</span>
+                    {% else %}
+                      {{ text_trial_over }}
+                    {% endif %}
+                    {% if license_key_set %} <span class="text-success">{{ text_secret_stored }}</span>{% endif %}
+                    <br/>{{ help_license }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+<script type="text/javascript">
+// ⚠ OpenCart 3 html-escapes controller URLs built by url->link() (& -> &amp;),
+// which breaks a fetch() target: the user_token is lost and the login page
+// comes back as HTML instead of JSON. The URL is printed with |raw and the
+// helper below covers themes that escape it again.
+function ccAcUrl(s) { return s.replace(/&amp;/g, '&'); }
+
+document.getElementById('button-save').addEventListener('click', function () {
+  var box = document.getElementById('alert-abandoned-cart');
+  box.innerHTML = '';
+  fetch(ccAcUrl('{{ save|raw }}'), { method: 'POST', body: new FormData(document.getElementById('form-abandoned-cart')), credentials: 'same-origin' })
+    .then(function (r) { return r.json(); })
+    .then(function (json) {
+      if (json.error) {
+        box.innerHTML = '<div class="alert alert-danger">' + json.error + '</div>';
+      } else if (json.success) {
+        box.innerHTML = '<div class="alert alert-success">' + json.success + '</div>';
+        var secrets = document.querySelectorAll('input[name="telegram_bot_token"], input[name="license_key"]');
+        for (var i = 0; i < secrets.length; i++) { secrets[i].value = ''; }
+      }
+      window.scrollTo(0, 0);
+    })
+    .catch(function () { box.innerHTML = '<div class="alert alert-danger">Request failed</div>'; });
+});
+
+// Connect / disconnect the Telegram bot. The token field is write-only, so a
+// value typed but not yet saved is posted along and the controller stores it.
+function ccAcBot(url, withToken) {
+  var box = document.getElementById('alert-abandoned-cart');
+  var body = new FormData();
+  if (withToken) {
+    var token = document.querySelector('input[name="telegram_bot_token"]');
+    body.append('telegram_bot_token', token ? token.value : '');
+  }
+  box.innerHTML = '';
+  fetch(ccAcUrl(url), { method: 'POST', body: body, credentials: 'same-origin' })
+    .then(function (r) { return r.json(); })
+    .then(function (json) {
+      var state = document.getElementById('telegram-webhook-state');
+      if (json.error) {
+        box.innerHTML = '<div class="alert alert-danger">' + json.error + '</div>';
+      } else if (json.success) {
+        box.innerHTML = '<div class="alert alert-success">' + json.success + '</div>';
+        if (state) {
+          state.textContent = json.connected ? '{{ text_webhook_waiting|escape('js') }}' : '{{ text_webhook_off|escape('js') }}';
+          state.className = json.connected ? 'text-success' : 'text-muted';
+        }
+      }
+      window.scrollTo(0, 0);
+    })
+    .catch(function () { box.innerHTML = '<div class="alert alert-danger">Request failed</div>'; });
+}
+
+document.getElementById('button-connect-bot').addEventListener('click', function () {
+  ccAcBot('{{ connect_bot|raw }}', true);
+});
+document.getElementById('button-disconnect-bot').addEventListener('click', function () {
+  ccAcBot('{{ disconnect_bot|raw }}', false);
+});
+</script>
+{{ footer }}
