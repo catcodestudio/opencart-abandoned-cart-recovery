@@ -1,0 +1,7 @@
+{
+  "name": "Abandoned Cart Recovery",
+  "description": "Abandoned cart recovery for OpenCart 4.x — captures carts of logged-in customers and of guests who entered an e-mail, marks them abandoned after N minutes, sends reminder e-mails with a one-time recovery link (only the token hash is stored), auto-detects recovered carts from new orders, admin list with status filter and statistics tiles. Pro: chain of up to three reminders, personal single-use coupon, Telegram notification, CSV export.",
+  "version": "1.0.0",
+  "author": "CatCode",
+  "link": "https://catcode.com.ua/modules/opencart-abandoned-cart-recovery"
+}

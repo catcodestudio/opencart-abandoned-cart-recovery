@@ -1,0 +1,132 @@
+{{ header }}{{ column_left }}
+<div id="content">
+  <div class="page-header">
+    <div class="container-fluid">
+      <div class="float-end">
+        {% if is_pro %}
+          <a href="{{ export }}{% if filter_status %}&amp;filter_status={{ filter_status }}{% endif %}" class="btn btn-outline-success"><i class="fa-solid fa-file-csv"></i> {{ button_export }}</a>
+        {% endif %}
+        <a href="{{ back }}" data-bs-toggle="tooltip" title="{{ button_back }}" class="btn btn-light"><i class="fa-solid fa-reply"></i></a>
+      </div>
+      <h1>{{ heading_carts }}</h1>
+      <ol class="breadcrumb">
+        {% for breadcrumb in breadcrumbs %}
+          <li class="breadcrumb-item"><a href="{{ breadcrumb.href }}">{{ breadcrumb.text }}</a></li>
+        {% endfor %}
+      </ol>
+    </div>
+  </div>
+  <div class="container-fluid">
+
+    <div class="row mb-3">
+      <div class="col-sm-3 mb-2">
+        <div class="card h-100"><div class="card-body">
+          <div class="fs-3 fw-semibold">{{ stats.abandoned }}</div>
+          <div class="text-muted small">{{ text_tile_abandoned }}</div>
+        </div></div>
+      </div>
+      <div class="col-sm-3 mb-2">
+        <div class="card h-100"><div class="card-body">
+          <div class="fs-3 fw-semibold">{{ stats.recovered }}</div>
+          <div class="text-muted small">{{ text_tile_recovered }}</div>
+        </div></div>
+      </div>
+      <div class="col-sm-3 mb-2">
+        <div class="card h-100"><div class="card-body">
+          <div class="fs-3 fw-semibold">{{ stats.revenue }}</div>
+          <div class="text-muted small">{{ text_tile_revenue }}</div>
+        </div></div>
+      </div>
+      <div class="col-sm-3 mb-2">
+        <div class="card h-100"><div class="card-body">
+          <div class="fs-3 fw-semibold">{{ stats.rate }}</div>
+          <div class="text-muted small">{{ text_tile_rate }}</div>
+        </div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><i class="fa-solid fa-filter"></i> {{ text_filter }}</div>
+      <div class="card-body">
+        <form method="get" action="index.php" class="row g-2 align-items-end">
+          <input type="hidden" name="route" value="extension/abandoned_cart/module/abandoned_cart.carts"/>
+          <input type="hidden" name="user_token" value="{{ user_token }}"/>
+          <div class="col-sm-4">
+            <label class="form-label">{{ entry_status }}</label>
+            <select name="filter_status" class="form-select">
+              {% for option in status_filters %}
+                <option value="{{ option.value }}"{% if option.value == filter_status %} selected{% endif %}>{{ option.text }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-sm-4">
+            <label class="form-label">{{ entry_email }}</label>
+            <input type="text" name="filter_email" value="{{ filter_email }}" class="form-control"/>
+          </div>
+          <div class="col-sm-4">
+            <button type="submit" class="btn btn-light"><i class="fa-solid fa-magnifying-glass"></i> {{ button_filter }}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card mt-3">
+      <div class="card-body table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+          <thead>
+            <tr>
+              <td>{{ column_customer }}</td>
+              <td>{{ column_products }}</td>
+              <td class="text-end">{{ column_total }}</td>
+              <td>{{ column_status }}</td>
+              <td class="text-center">{{ column_reminders }}</td>
+              <td>{{ column_captured }}</td>
+            </tr>
+          </thead>
+          <tbody>
+          {% if carts %}
+            {% for cart in carts %}
+              <tr>
+                <td>
+                  <strong>{{ cart.email }}</strong>
+                  {% if cart.customer_name %}<br/><span class="text-muted small">{{ cart.customer_name }}</span>{% endif %}
+                  {% if cart.registered %}<br/><span class="text-muted small">{{ text_registered }}</span>{% endif %}
+                </td>
+                <td>
+                  {% for line in cart.items %}{{ line }}<br/>{% else %}&mdash;{% endfor %}
+                </td>
+                <td class="text-end">
+                  {{ cart.cart_total }}
+                  {% if cart.order_link %}<br/><a href="{{ cart.order_link }}">#{{ cart.recovered_order_id }}</a>{% endif %}
+                </td>
+                <td>
+                  {% if cart.status == 'recovered' %}<span class="badge bg-success">{{ cart.status_text }}</span>
+                  {% elseif cart.status == 'abandoned' %}<span class="badge bg-warning text-dark">{{ cart.status_text }}</span>
+                  {% elseif cart.status == 'active' %}<span class="badge bg-info text-dark">{{ cart.status_text }}</span>
+                  {% else %}<span class="badge bg-secondary">{{ cart.status_text }}</span>{% endif %}
+                </td>
+                <td class="text-center">
+                  {{ cart.emails_sent }}
+                  {% if cart.last_email_at %}<br/><span class="text-muted small">{{ cart.last_email_at }}</span>{% endif %}
+                  {% if cart.coupon_code %}<br/><code>{{ cart.coupon_code }}</code>{% endif %}
+                </td>
+                <td>
+                  {{ cart.created_at }}
+                  {% if cart.abandoned_at %}<br/><span class="text-muted small">{{ text_abandoned_at }} {{ cart.abandoned_at }}</span>{% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          {% else %}
+            <tr><td colspan="6" class="text-center">{{ text_no_carts }}</td></tr>
+          {% endif %}
+          </tbody>
+        </table>
+        <div class="row">
+          <div class="col-sm-6 text-start">{{ pagination }}</div>
+          <div class="col-sm-6 text-end">{{ results }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{ footer }}
