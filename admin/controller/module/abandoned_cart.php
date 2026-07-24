@@ -494,15 +494,18 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$this->load->model('setting/event');
 
 		// ⚠ OpenCart 4 addEvent() takes a single associative array; the OC3
-		// positional signature fatals here. Triggers use dot notation:
-		// route.method/before|after.
+		// positional signature fatals here. The method separator differs by
+		// minor version (4.0.2.x = slash, 4.1.x = dot), so the trigger uses a
+		// `*` wildcard between route and method — the core event matcher
+		// expands it to `.*` and fires on both. A bare dot silently misses
+		// every event on OpenCart 4.0.2.x.
 		$events = [
-			['abandoned_cart_cart_add',      'catalog/controller/checkout/cart.add/after',            'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_cart_edit',     'catalog/controller/checkout/cart.edit/after',           'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_cart_remove',   'catalog/controller/checkout/cart.remove/after',         'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_register',      'catalog/controller/checkout/register.save/after',       'extension/abandoned_cart/events.registerSaved'],
-			['abandoned_cart_order_history', 'catalog/model/checkout/order.addHistory/after',         'extension/abandoned_cart/events.orderHistoryAdded'],
-			['abandoned_cart_coupon_guard',  'catalog/model/marketing/coupon.getCoupon/after',        'extension/abandoned_cart/events.couponGuard'],
+			['abandoned_cart_cart_add',      'catalog/controller/checkout/cart*add/after',            'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_cart_edit',     'catalog/controller/checkout/cart*edit/after',           'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_cart_remove',   'catalog/controller/checkout/cart*remove/after',         'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_register',      'catalog/controller/checkout/register*save/after',       'extension/abandoned_cart/events.registerSaved'],
+			['abandoned_cart_order_history', 'catalog/model/checkout/order*addHistory/after',         'extension/abandoned_cart/events.orderHistoryAdded'],
+			['abandoned_cart_coupon_guard',  'catalog/model/marketing/coupon*getCoupon/after',        'extension/abandoned_cart/events.couponGuard'],
 			['abandoned_cart_footer',        'catalog/view/common/footer/after',                      'extension/abandoned_cart/events.injectCapture'],
 		];
 
