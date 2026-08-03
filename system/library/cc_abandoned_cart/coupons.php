@@ -121,12 +121,22 @@ class Coupons {
 		return str_replace(['{value}', '{code}', '{days}'], [trim($value), $code, (string)$days], $template);
 	}
 
-	/** Remove coupons this extension generated for rows that no longer exist. */
+	/**
+	 * Remove coupons this extension generated for rows that no longer exist.
+	 *
+	 * ⚠ An orphan is deleted whether or not it has expired. The e-mail binding
+	 * lives on the cart row, so a coupon whose row is gone is no longer personal
+	 * at all — anybody who was forwarded the code could spend it. Expiry is not
+	 * the condition; having no owner is.
+	 *
+	 * The one-hour floor covers the gap in codeForCart(), where the coupon row
+	 * exists for a moment before the code is written back to the cart.
+	 */
 	public function purgeOrphans(): void {
 		$this->db->query("DELETE c FROM `" . DB_PREFIX . "coupon` c
 			LEFT JOIN `" . Repository::table() . "` a ON a.`coupon_id` = c.`coupon_id`
 			WHERE c.`code` LIKE '" . $this->db->escape('BACK-%') . "'
 			  AND a.`abandoned_cart_id` IS NULL
-			  AND c.`date_end` < CURDATE()");
+			  AND c.`date_added` < DATE_SUB(NOW(), INTERVAL 1 HOUR)");
 	}
 }

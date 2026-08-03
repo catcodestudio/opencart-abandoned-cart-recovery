@@ -142,7 +142,34 @@ class Repository {
 	}
 
 	public function delete(int $id): void {
+		// ⚠ The personal coupon must die with its row. The storefront guard
+		// (events.couponGuard) can only tell whose coupon a code is while the
+		// row that carries it exists — once the row is gone the code turns into
+		// an ordinary discount anybody who was handed it can spend.
+		$this->dropCoupons([$id]);
+
 		$this->db->query("DELETE FROM `" . self::table() . "` WHERE `abandoned_cart_id` = " . $id);
+	}
+
+	/**
+	 * Delete the recovery coupons issued for the given rows.
+	 *
+	 * Only rows this extension generated are touched: the coupon id has to come
+	 * from our own table AND the code has to carry our prefix, so a merchant who
+	 * pointed `coupon_id` at a hand-made coupon does not lose it.
+	 *
+	 * @param int[] $ids
+	 */
+	private function dropCoupons(array $ids): void {
+		$ids = array_filter(array_map('intval', $ids));
+		if (!$ids) {
+			return;
+		}
+
+		$this->db->query("DELETE c FROM `" . DB_PREFIX . "coupon` c
+			INNER JOIN `" . self::table() . "` a ON a.`coupon_id` = c.`coupon_id`
+			WHERE a.`abandoned_cart_id` IN (" . implode(',', $ids) . ")
+			  AND c.`code` LIKE '" . $this->db->escape('BACK-%') . "'");
 	}
 
 	/* ----------------------------------------------------------------- read */
@@ -319,6 +346,12 @@ class Repository {
 		if ($days < 1) {
 			return;
 		}
+		// Same reasoning as delete(): the coupon goes with the row it belongs to.
+		$this->db->query("DELETE c FROM `" . DB_PREFIX . "coupon` c
+			INNER JOIN `" . self::table() . "` a ON a.`coupon_id` = c.`coupon_id`
+			WHERE a.`updated_at` < DATE_SUB(NOW(), INTERVAL " . $days . " DAY)
+			  AND c.`code` LIKE '" . $this->db->escape('BACK-%') . "'");
+
 		$this->db->query("DELETE FROM `" . self::table() . "`
 			WHERE `updated_at` < DATE_SUB(NOW(), INTERVAL " . $days . " DAY)");
 	}

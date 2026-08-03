@@ -22,10 +22,13 @@
       <div class="alert alert-warning"><i class="fa-solid fa-triangle-exclamation"></i> {{ text_crypto_broken }}</div>
     {% endif %}
 
-    {% if not is_pro %}
-      <div class="alert alert-secondary">{{ text_trial_over }}</div>
-    {% elseif not has_license and trial_active %}
-      <div class="alert alert-info">{{ text_trial_left|replace({'%s': trial_days_left}) }}</div>
+    {% if not is_pro and not notice_dismissed %}
+      <div class="alert alert-info alert-dismissible d-flex align-items-center" id="cc-ac-notice">
+        <i class="fa-solid fa-circle-info me-2"></i>
+        <div class="flex-grow-1">{{ text_notice }}</div>
+        <button type="button" class="btn btn-primary btn-sm ms-3" data-bs-toggle="modal" data-bs-target="#cc-ac-pro-modal">{{ text_try_pro }}</button>
+        <button type="button" class="btn-close ms-2" id="cc-ac-notice-close"></button>
+      </div>
     {% endif %}
 
     <div class="card">
@@ -35,8 +38,8 @@
           <ul class="nav nav-tabs">
             <li class="nav-item"><a href="#tab-general" data-bs-toggle="tab" class="nav-link active">{{ tab_general }}</a></li>
             <li class="nav-item"><a href="#tab-emails" data-bs-toggle="tab" class="nav-link">{{ tab_emails }}</a></li>
-            <li class="nav-item"><a href="#tab-coupon" data-bs-toggle="tab" class="nav-link">{{ tab_coupon }}</a></li>
-            <li class="nav-item"><a href="#tab-telegram" data-bs-toggle="tab" class="nav-link">{{ tab_telegram }}</a></li>
+            <li class="nav-item"><a href="#tab-coupon" data-bs-toggle="tab" class="nav-link">{{ tab_coupon }}{% if not is_pro %} <span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}</a></li>
+            <li class="nav-item"><a href="#tab-telegram" data-bs-toggle="tab" class="nav-link">{{ tab_telegram }}{% if not is_pro %} <span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}</a></li>
             <li class="nav-item"><a href="#tab-license" data-bs-toggle="tab" class="nav-link">{{ tab_license }}</a></li>
           </ul>
 
@@ -95,8 +98,9 @@
                 <fieldset{% if locked %} class="opacity-50"{% endif %}>
                   <legend class="fs-6">
                     {{ attribute(_context, 'legend_email_' ~ n) }}
-                    {% if n > 1 %}<span class="badge bg-primary">PRO</span>{% endif %}
+                    {% if n > 1 %}<span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}
                   </legend>
+                  {% if locked %}<div class="small text-muted mb-3">{{ help_pro_reminders }}</div>{% endif %}
 
                   {% if n > 1 %}
                     <div class="row mb-3">
@@ -143,7 +147,7 @@
             </div>
 
             <div id="tab-coupon" class="tab-pane">
-              <div class="alert alert-light">{{ help_coupon_intro }} {% if not is_pro %}<strong>{{ text_pro_only }}</strong>{% endif %}</div>
+              <div class="alert alert-light">{{ help_coupon_intro }}{% if not is_pro %} <strong>{{ text_pro_only }}</strong><div class="small text-muted mt-1">{{ help_pro_coupon }}</div>{% endif %}</div>
               <div class="row mb-3">
                 <label class="col-sm-3 col-form-label">{{ entry_coupon_enabled }}</label>
                 <div class="col-sm-9">
@@ -180,7 +184,7 @@
             </div>
 
             <div id="tab-telegram" class="tab-pane">
-              <div class="alert alert-light">{{ help_telegram_intro }} {% if not is_pro %}<strong>{{ text_pro_only }}</strong>{% endif %}</div>
+              <div class="alert alert-light">{{ help_telegram_intro }}{% if not is_pro %} <strong>{{ text_pro_only }}</strong><div class="small text-muted mt-1">{{ help_pro_telegram }}</div>{% endif %}</div>
               <div class="row mb-3">
                 <label class="col-sm-3 col-form-label">{{ entry_telegram_enabled }}</label>
                 <div class="col-sm-9">
@@ -231,18 +235,23 @@
               <div class="row mb-3">
                 <label class="col-sm-3 col-form-label">{{ entry_license }}</label>
                 <div class="col-sm-9">
-                  <input type="password" name="license_key" value="" autocomplete="new-password" class="form-control"/>
-                  <div class="form-text">
-                    {% if has_license %}
-                      <span class="text-success">✔ {{ text_license_active }}</span>
-                    {% elseif trial_active %}
-                      <span class="text-success">{{ text_trial_left|replace({'%s': trial_days_left}) }}</span>
+                  <div class="d-flex align-items-center flex-wrap gap-2" id="cc-ac-license-state">
+                    {% if is_pro %}
+                      {% if trial_active %}
+                        <span class="badge bg-success">{{ text_trial_days_left|format(trial_days_left) }}</span>
+                      {% else %}
+                        <span class="badge bg-success">{{ text_pro_active }}</span>
+                      {% endif %}
+                      {% if license_expires %}
+                        <span class="text-muted small">{{ text_license_until|format(license_expires) }}</span>
+                      {% endif %}
+                      <button type="button" class="btn btn-outline-secondary btn-sm" id="cc-ac-deactivate">{{ text_deactivate }}</button>
                     {% else %}
-                      {{ text_trial_over }}
+                      <span class="badge bg-secondary">{{ text_free_version }}</span>
+                      <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#cc-ac-pro-modal">{{ text_try_pro }}</button>
                     {% endif %}
-                    {% if license_key_set %} <span class="text-success">{{ text_secret_stored }}</span>{% endif %}
-                    <br/>{{ help_license }}
                   </div>
+                  <div class="form-text">{{ help_license_pro }}</div>
                 </div>
               </div>
             </div>
@@ -253,6 +262,39 @@
     </div>
   </div>
 </div>
+
+<div class="modal fade" id="cc-ac-pro-modal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">{{ text_modal_title }}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-pills nav-fill mb-3">
+          <li class="nav-item"><a href="#cc-ac-pane-trial" data-bs-toggle="tab" class="nav-link{% if trial_available %} active{% endif %}">{{ text_tab_trial }}</a></li>
+          <li class="nav-item"><a href="#cc-ac-pane-key" data-bs-toggle="tab" class="nav-link{% if not trial_available %} active{% endif %}">{{ text_tab_key }}</a></li>
+        </ul>
+        <div class="tab-content">
+          <div id="cc-ac-pane-trial" class="tab-pane{% if trial_available %} active{% endif %}">
+            <p class="text-muted small">{{ text_trial_lede }}</p>
+            <label class="form-label">{{ text_email }}</label>
+            <input type="email" id="cc-ac-trial-email" class="form-control mb-3" placeholder="you@example.com"/>
+            <button type="button" class="btn btn-primary w-100" id="cc-ac-trial-go">{{ text_get_key }}</button>
+          </div>
+          <div id="cc-ac-pane-key" class="tab-pane{% if not trial_available %} active{% endif %}">
+            <p class="text-muted small">{{ text_key_lede }}</p>
+            <label class="form-label">{{ entry_license }}</label>
+            <input type="text" id="cc-ac-key" class="form-control mb-3" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off"/>
+            <button type="button" class="btn btn-primary w-100" id="cc-ac-key-go">{{ text_activate }}</button>
+          </div>
+        </div>
+        <div id="cc-ac-modal-result" class="mt-3"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script type="text/javascript">
 // Twig html-escapes controller URLs (& -> &amp;), which breaks fetch() targets:
 // the user_token is lost and the login page comes back as HTML instead of JSON.
@@ -310,5 +352,95 @@ document.getElementById('button-connect-bot').addEventListener('click', function
 document.getElementById('button-disconnect-bot').addEventListener('click', function () {
   ccAcBot('{{ disconnect_bot|raw }}', false);
 });
+
+// --------------------------------------------------------------- licensing
+function ccAcPost(url, body, onOk) {
+  var box = document.getElementById('cc-ac-modal-result');
+  fetch(ccAcUrl(url), { method: 'POST', body: body, credentials: 'same-origin' })
+    .then(function (r) { return r.json(); })
+    .then(function (json) {
+      if (json.error) {
+        if (box) { box.innerHTML = '<div class="alert alert-danger mb-0">' + json.error + '</div>'; }
+        return;
+      }
+      onOk(json, box);
+    })
+    .catch(function () {
+      if (box) { box.innerHTML = '<div class="alert alert-danger mb-0">Request failed</div>'; }
+    });
+}
+
+var ccAcTrialGo = document.getElementById('cc-ac-trial-go');
+if (ccAcTrialGo) {
+  ccAcTrialGo.addEventListener('click', function () {
+    var email = document.getElementById('cc-ac-trial-email');
+    var body  = new FormData();
+    body.append('email', email ? email.value : '');
+
+    ccAcPost('{{ license_trial|raw }}', body, function (json, box) {
+      // The key is shown here as well as mailed: a shop owner who closes the
+      // letter by accident should not have to ask support for it.
+      var html = '<div class="alert alert-success mb-2">' + json.success + '</div>';
+      if (json.key) {
+        html += '<div class="input-group"><span class="input-group-text">{{ text_your_key|escape('js') }}</span>'
+              + '<input type="text" class="form-control" id="cc-ac-issued-key" readonly value="' + json.key + '"/>'
+              + '<button type="button" class="btn btn-outline-secondary" id="cc-ac-copy">{{ text_copy|escape('js') }}</button></div>';
+      }
+      if (json.expires_at) {
+        html += '<div class="form-text">' + json.expires_at + '</div>';
+      }
+      box.innerHTML = html;
+
+      var copy = document.getElementById('cc-ac-copy');
+      if (copy) {
+        copy.addEventListener('click', function () {
+          var field = document.getElementById('cc-ac-issued-key');
+          field.select();
+          document.execCommand('copy');
+          copy.textContent = '{{ text_copied|escape('js') }}';
+        });
+      }
+
+      setTimeout(function () { location.reload(); }, 2500);
+    });
+  });
+}
+
+var ccAcKeyGo = document.getElementById('cc-ac-key-go');
+if (ccAcKeyGo) {
+  ccAcKeyGo.addEventListener('click', function () {
+    var key  = document.getElementById('cc-ac-key');
+    var body = new FormData();
+    body.append('license_key', key ? key.value : '');
+
+    ccAcPost('{{ license_activate|raw }}', body, function (json, box) {
+      box.innerHTML = '<div class="alert alert-success mb-0">' + json.success + '</div>';
+      setTimeout(function () { location.reload(); }, 1500);
+    });
+  });
+}
+
+var ccAcDeactivate = document.getElementById('cc-ac-deactivate');
+if (ccAcDeactivate) {
+  ccAcDeactivate.addEventListener('click', function () {
+    var box = document.getElementById('alert-abandoned-cart');
+    fetch(ccAcUrl('{{ license_deactivate|raw }}'), { method: 'POST', credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (json) {
+        box.innerHTML = '<div class="alert alert-' + (json.error ? 'danger' : 'success') + '">' + (json.error || json.success) + '</div>';
+        if (!json.error) { setTimeout(function () { location.reload(); }, 1200); }
+      });
+  });
+}
+
+var ccAcNoticeClose = document.getElementById('cc-ac-notice-close');
+if (ccAcNoticeClose) {
+  ccAcNoticeClose.addEventListener('click', function () {
+    // Dismissed once means dismissed for good — no nagging on every page load.
+    fetch(ccAcUrl('{{ dismiss_notice|raw }}'), { method: 'POST', credentials: 'same-origin' });
+    var notice = document.getElementById('cc-ac-notice');
+    if (notice) { notice.remove(); }
+  });
+}
 </script>
 {{ footer }}

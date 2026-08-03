@@ -15,8 +15,15 @@ class Settings {
 	public const CODE   = 'module_abandoned_cart';
 	public const PREFIX = 'module_abandoned_cart_';
 
-	/** Fields encrypted at rest. */
-	public const SECRET_KEYS = ['telegram_bot_token', 'license_key'];
+	/**
+	 * Fields encrypted at rest.
+	 *
+	 * ⚠ `license_key` is NOT here: it is written and read by the licence client
+	 * as plain text (the server has to receive the key verbatim, and the module
+	 * must keep working when the shop moves and the crypto key changes). A key
+	 * is worthless without the matching site_url anyway.
+	 */
+	public const SECRET_KEYS = ['telegram_bot_token'];
 
 	private $config;
 	private ?array $cache = null;
@@ -72,9 +79,14 @@ class Settings {
 			// Non-empty means "a webhook is currently registered".
 			'telegram_webhook_secret' => '',
 
-			// Licensing.
+			// Licensing — written by the licence client, never by the settings form.
 			'license_key'        => '',
+			'license_status'     => '',
+			'license_checked_at' => '',
+			'license_expires_at' => '',
+			'license_data'       => '',
 			'trial_started'      => '0',
+			'notice_dismissed'   => '0',
 		];
 	}
 

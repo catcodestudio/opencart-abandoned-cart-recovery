@@ -57,9 +57,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		// Secrets are never echoed back into the form; a blank field on save
 		// keeps whatever is already stored.
 		$data['telegram_bot_token_set'] = $all['telegram_bot_token'] !== '' ? 1 : 0;
-		$data['license_key_set']        = $all['license_key'] !== '' ? 1 : 0;
 		$data['telegram_bot_token']     = '';
-		$data['license_key']            = '';
 
 		// The webhook secret is a credential too: only its presence is exposed,
 		// never the value itself.
@@ -81,10 +79,22 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 			}
 		}
 
-		$data['is_pro']          = License::isPro($this->config);
-		$data['has_license']     = License::hasLicense($this->config);
-		$data['trial_active']    = License::trialActive($this->config);
-		$data['trial_days_left'] = License::trialDaysLeft($this->config);
+		// A stored key is re-verified in the background at most once a day; an
+		// unreachable server is a no-op thanks to the grace window in isPro().
+		License::maybeVerify($this->registry);
+
+		$data['is_pro']           = License::isPro($this->registry);
+		$data['has_license']      = License::hasKey($this->registry);
+		$data['trial_active']     = License::trialActive($this->registry);
+		$data['trial_available']  = License::trialAvailable($this->registry);
+		$data['trial_days_left']  = License::trialDaysLeft($this->registry);
+		$data['license_expires']  = License::expiresAt($this->registry);
+		$data['notice_dismissed'] = (int)$this->config->get(Settings::PREFIX . 'notice_dismissed') === 1;
+
+		$data['license_trial']      = $this->url->link($this->route . '.licenseTrial', $token);
+		$data['license_activate']   = $this->url->link($this->route . '.licenseActivate', $token);
+		$data['license_deactivate'] = $this->url->link($this->route . '.licenseDeactivate', $token);
+		$data['dismiss_notice']     = $this->url->link($this->route . '.dismissNotice', $token);
 
 		$data['cron_url'] = (defined('HTTP_CATALOG') ? HTTP_CATALOG : '') . 'index.php?route=extension/abandoned_cart/cron.scan';
 
@@ -106,7 +116,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		if (!$json) {
 			$post     = $this->request->post;
 			$settings = new Settings($this->config);
-			$isPro    = License::isPro($this->config);
+			$isPro    = License::isPro($this->registry);
 			$current  = $settings->all();
 
 			$values = [];
@@ -181,10 +191,13 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 			}
 
 			// ⚠ editSetting() deletes every row of this code first, so any key
-			// that is not part of the payload — the Pro trial start — would be
-			// wiped on save and the trial would restart forever. Carry it over.
-			$started = (int)$this->config->get(Settings::PREFIX . 'trial_started');
-			$data[Settings::PREFIX . 'trial_started'] = (string)($started > 0 ? $started : time());
+			// the form does not post would be wiped on save. The licence state is
+			// written by the licence client and by the dismiss button, never by
+			// this form — carry it over verbatim, otherwise every "Save" would
+			// deactivate a paid licence. Saving must NOT start a trial either.
+			foreach (License::serverOwned() as $key) {
+				$data[$key] = (string)$this->config->get($key);
+			}
 
 			// Same trap for the webhook secret: it is written by "Connect bot",
 			// never by this form, so without carrying it over an ordinary save
@@ -198,6 +211,132 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		}
 
 		$this->jsonResponse($json);
+	}
+
+	/* ------------------------------------------------------------- licensing */
+
+	/**
+	 * "Try 7 days" — mint a real licence key for this shop and activate it.
+	 *
+	 * The key is shown right in the modal and duplicated by e-mail, so the
+	 * merchant ends up with exactly what a buyer gets, only shorter-lived.
+	 */
+	public function licenseTrial(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		}
+
+		if (!$json) {
+			$email  = trim((string)($this->request->post['email'] ?? ''));
+			$result = License::startTrial($this->registry, $email);
+
+			if (!empty($result['ok'])) {
+				$json['success']    = $this->language->get('text_trial_started');
+				$json['key']        = (string)($result['key'] ?? '');
+				$json['expires_at'] = (string)($result['expires_at'] ?? '');
+			} else {
+				$json['error'] = $this->licenseError($result);
+			}
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/** Activate a key the merchant pasted after buying on catcode.com.ua. */
+	public function licenseActivate(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		}
+
+		if (!$json) {
+			$key = trim((string)($this->request->post['license_key'] ?? ''));
+
+			if (!License::keyLooksValid($key)) {
+				$json['error'] = $this->language->get('error_license_format');
+			} else {
+				$result = License::activate($this->registry, $key);
+
+				if (!empty($result['ok'])) {
+					$json['success']    = $this->language->get('text_license_activated');
+					$json['expires_at'] = License::expiresAt($this->registry);
+				} else {
+					$json['error'] = $this->licenseError($result);
+				}
+			}
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/** Release the activation slot so the key can be moved to another shop. */
+	public function licenseDeactivate(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		}
+
+		if (!$json) {
+			License::deactivate($this->registry);
+			$json['success'] = $this->language->get('text_license_deactivated');
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/** Hide the Pro notice for good — one dismissal, never shown again. */
+	public function dismissNotice(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		} else {
+			Settings::writeValue($this->db, 'notice_dismissed', '1');
+			$json['success'] = 1;
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/**
+	 * Turn a licence-server verdict into a sentence the shop owner can act on.
+	 * An unknown code falls back to the generic message plus the raw code, so a
+	 * new server-side error is still diagnosable from the screen.
+	 */
+	private function licenseError(array $result): string {
+		$code = (string)($result['error'] ?? '');
+
+		$known = [
+			'bad_email'       => 'error_license_email',
+			'missing_key'     => 'error_license_format',
+			'invalid_key'     => 'error_license_invalid',
+			'expired'         => 'error_license_expired',
+			'limit_reached'   => 'error_license_limit',
+			'wrong_product'   => 'error_license_product',
+			'trial_used_site' => 'error_trial_used',
+			'trial_used'      => 'error_trial_used',
+			'network'         => 'error_license_network',
+			'no_curl'         => 'error_license_network',
+			'bad_response'    => 'error_license_network',
+		];
+
+		if (isset($known[$code])) {
+			return $this->language->get($known[$code]);
+		}
+
+		$message = trim((string)($result['message'] ?? ''));
+
+		return $this->language->get('error_license_generic')
+			. ($code !== '' ? ' (' . $code . ')' : '')
+			. ($message !== '' ? ' ' . $message : '');
 	}
 
 	/* --------------------------------------------------------- Pro: Telegram */
@@ -216,7 +355,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 
 		if (!$this->user->hasPermission('modify', $this->route)) {
 			$json['error'] = $this->language->get('error_permission');
-		} elseif (!License::isPro($this->config)) {
+		} elseif (!License::isPro($this->registry)) {
 			$json['error'] = $this->language->get('error_pro');
 		}
 
@@ -313,7 +452,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$data['export']     = $this->url->link($this->route . '.export', $token);
 		$data['list_url']   = $this->url->link($this->route . '.carts', $token);
 		$data['user_token'] = $this->session->data['user_token'];
-		$data['is_pro']     = License::isPro($this->config);
+		$data['is_pro']     = License::isPro($this->registry);
 
 		$status = (string)($this->request->get['filter_status'] ?? '');
 		$search = trim((string)($this->request->get['filter_email'] ?? ''));
@@ -418,7 +557,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 	public function export(): void {
 		$this->load->language($this->route);
 
-		if (!$this->user->hasPermission('access', $this->route) || !License::isPro($this->config)) {
+		if (!$this->user->hasPermission('access', $this->route) || !License::isPro($this->registry)) {
 			$this->response->setOutput($this->language->get('error_pro'));
 
 			return;
@@ -475,35 +614,31 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 	public function install(): void {
 		(new Repository($this->db))->install();
 
-		// ⚠ Start the 7-day Pro free trial. model_setting_setting->editValue()
-		// only runs an UPDATE — on a fresh install the row does not exist yet,
-		// so the write would be silently lost and Pro would stay unlocked
-		// forever. Insert the row directly instead.
-		$exists = $this->db->query("SELECT `setting_id` FROM `" . DB_PREFIX . "setting`
-			WHERE `store_id` = '0' AND `code` = '" . Settings::CODE . "' AND `key` = '" . Settings::PREFIX . "trial_started' LIMIT 1");
-
-		if (!$exists->num_rows) {
-			$this->db->query("INSERT INTO `" . DB_PREFIX . "setting`
-				SET `store_id` = '0',
-				    `code` = '" . Settings::CODE . "',
-				    `key` = '" . Settings::PREFIX . "trial_started',
-				    `value` = '" . (int)time() . "',
-				    `serialized` = '0'");
-		}
+		// ⚠ Installing enables nothing. Earlier builds started the 7-day Pro
+		// trial right here, so a merchant who only wanted the free reminder got
+		// features he never asked for and lost them a week later. The trial is
+		// now offered as a button and issued as a real licence key.
 
 		$this->load->model('setting/event');
 
 		// ⚠ OpenCart 4 addEvent() takes a single associative array; the OC3
-		// positional signature fatals here. The method separator differs by
-		// minor version (4.0.2.x = slash, 4.1.x = dot), so the trigger uses a
-		// `*` wildcard between route and method — the core event matcher
-		// expands it to `.*` and fires on both. A bare dot silently misses
-		// every event on OpenCart 4.0.2.x.
+		// positional signature fatals here.
+		//
+		// ⚠ Model events are named DIFFERENTLY across 4.0 and 4.1, and picking
+		// either literal separator silently kills the feature on the other:
+		//   4.0.2 Loader::model → $route . '/' . $method  → checkout/order/addHistory
+		//   4.1.0 Loader::model → $route . '.' . $method  → checkout/order.addHistory
+		// Event::trigger() turns `*` into `.*`, so a star matches both. It is the
+		// only spelling that works on every 4.x — and nothing warns you when the
+		// trigger matches nothing: install() succeeds, the row sits in `oc_event`
+		// with status=1, and the handler simply never runs.
+		// Controllers are unaffected: there the method is part of the route itself
+		// (`checkout/cart.add`), so the dot stays.
 		$events = [
-			['abandoned_cart_cart_add',      'catalog/controller/checkout/cart*add/after',            'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_cart_edit',     'catalog/controller/checkout/cart*edit/after',           'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_cart_remove',   'catalog/controller/checkout/cart*remove/after',         'extension/abandoned_cart/events.cartChanged'],
-			['abandoned_cart_register',      'catalog/controller/checkout/register*save/after',       'extension/abandoned_cart/events.registerSaved'],
+			['abandoned_cart_cart_add',      'catalog/controller/checkout/cart.add/after',            'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_cart_edit',     'catalog/controller/checkout/cart.edit/after',           'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_cart_remove',   'catalog/controller/checkout/cart.remove/after',         'extension/abandoned_cart/events.cartChanged'],
+			['abandoned_cart_register',      'catalog/controller/checkout/register.save/after',       'extension/abandoned_cart/events.registerSaved'],
 			['abandoned_cart_order_history', 'catalog/model/checkout/order*addHistory/after',         'extension/abandoned_cart/events.orderHistoryAdded'],
 			['abandoned_cart_coupon_guard',  'catalog/model/marketing/coupon*getCoupon/after',        'extension/abandoned_cart/events.couponGuard'],
 			['abandoned_cart_footer',        'catalog/view/common/footer/after',                      'extension/abandoned_cart/events.injectCapture'],

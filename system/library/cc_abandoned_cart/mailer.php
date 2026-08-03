@@ -85,14 +85,23 @@ class Mailer {
 			// A store that never opened the mail settings has an empty engine,
 			// and Mail() then dies with "Could not load mail adaptor".
 			$engine = trim((string)$config->get('config_mail_engine'));
-			$mail   = new \Opencart\System\Library\Mail($engine !== '' ? $engine : 'mail');
 
-			$mail->parameter     = $config->get('config_mail_parameter');
-			$mail->smtp_hostname = $config->get('config_mail_smtp_hostname');
-			$mail->smtp_username = $config->get('config_mail_smtp_username');
-			$mail->smtp_password = html_entity_decode((string)$config->get('config_mail_smtp_password'), ENT_QUOTES, 'UTF-8');
-			$mail->smtp_port     = $config->get('config_mail_smtp_port');
-			$mail->smtp_timeout  = $config->get('config_mail_smtp_timeout');
+			// ⚠ OpenCart 4 takes the transport settings as the SECOND constructor
+			// argument and copies them into the adaptor. Assigning them as
+			// properties afterwards (the OC3 habit) creates dynamic properties on
+			// Mail — deprecated since PHP 8.2 and noisy in error.log — and, worse,
+			// the adaptor never sees them: a shop configured for SMTP would have
+			// every reminder sent through plain mail() instead.
+			$option = [
+				'parameter'     => $config->get('config_mail_parameter'),
+				'smtp_hostname' => $config->get('config_mail_smtp_hostname'),
+				'smtp_username' => $config->get('config_mail_smtp_username'),
+				'smtp_password' => html_entity_decode((string)$config->get('config_mail_smtp_password'), ENT_QUOTES, 'UTF-8'),
+				'smtp_port'     => $config->get('config_mail_smtp_port'),
+				'smtp_timeout'  => $config->get('config_mail_smtp_timeout'),
+			];
+
+			$mail = new \Opencart\System\Library\Mail($engine !== '' ? $engine : 'mail', $option);
 
 			$mail->setTo($to);
 			$mail->setFrom((string)$config->get('config_email'));

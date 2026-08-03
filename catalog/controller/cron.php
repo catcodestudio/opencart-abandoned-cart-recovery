@@ -34,7 +34,7 @@ class Cron extends \Opencart\System\Engine\Controller {
 
 		$settings   = new Settings($this->config);
 		$repository = new Repository($this->db);
-		$isPro      = License::isPro($this->config);
+		$isPro      = License::isPro($this->registry);
 
 		$this->promoteIdle($settings, $repository, $isPro);
 		$this->sendDue($settings, $repository, $isPro);

@@ -1,5 +1,6 @@
 <?php
 namespace Opencart\System\Library\CcAbandonedCart;
+require_once __DIR__ . '/polyfill.php';
 
 /**
  * At-rest encryption for stored secrets (Telegram bot token, licence key).
