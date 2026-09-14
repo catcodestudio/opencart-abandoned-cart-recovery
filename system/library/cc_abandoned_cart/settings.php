@@ -98,6 +98,8 @@ class Settings {
 			'license_checked_at' => '',
 			'license_expires_at' => '',
 			'license_data'       => '',
+			'license_kind'       => '', // trial | purchase — from the server's answer
+			'license_owned'      => '', // '1' once a purchase is confirmed: Pro stays on
 			'trial_started'      => '0',
 			'notice_dismissed'   => '0',
 		];

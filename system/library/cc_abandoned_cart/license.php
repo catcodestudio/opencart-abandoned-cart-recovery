@@ -85,21 +85,34 @@ class License {
 		// every verify, but the local check means a trial cannot be stretched by
 		// cutting the site off from the internet: the grace window below exists for
 		// paying customers, not for trials.
-		if (self::isTrialKey($registry) && self::trialDaysLeft($registry) < 1) {
+		if (self::isTrialKey($registry) && self::trialDaysLeft($registry) === 0) {
 			return false;
 		}
 
 		return (time() - (int)strtotime($checkedAt)) <= self::GRACE_DAYS * 86400;
 	}
 
-	/** A confirmed purchase — the features stay on even after the term lapses. */
+	/** A confirmed purchase — the Pro features stay on for good, whatever the server says later. */
 	public static function isOwned(\Opencart\System\Engine\Registry $registry): bool {
-		return '1' === (string)$registry->get('config')->get(self::PREFIX . 'license_owned');
+		return self::hasKey($registry) && '1' === (string)$registry->get('config')->get(self::PREFIX . 'license_owned');
 	}
 
-	/** The stored key came from the trial endpoint rather than from a purchase. */
+	/** The stored key is the 7-day trial rather than a purchase. */
 	public static function isTrialKey(\Opencart\System\Engine\Registry $registry): bool {
-		return 'trial' === (string)$registry->get('config')->get(self::PREFIX . 'license_kind');
+		$kind = (string)$registry->get('config')->get(self::PREFIX . 'license_kind');
+
+		if ($kind !== '') {
+			return $kind === 'trial';
+		}
+
+		// Older versions never recorded the kind. Until the first server answer fills
+		// it in, a key whose expiry sits within about a week of the trial start is read
+		// as that trial — the cautious reading. A purchased OpenCart key has no expiry
+		// and is never mistaken for it.
+		$started = self::trialStarted($registry);
+		$expires = (int)strtotime((string)$registry->get('config')->get(self::PREFIX . 'license_expires_at'));
+
+		return self::hasKey($registry) && $started > 0 && $expires > 0 && ($expires - $started) <= 8 * 86400;
 	}
 
 	/**
@@ -147,9 +160,13 @@ class License {
 		return (bool)preg_match('/^[A-Z0-9]{4,10}(-[A-Z0-9]{4,10}){1,6}$/', $key);
 	}
 
-	/** True only after the merchant opted in; a never-started trial is not active. */
+	/**
+	 * Pro is on, and it is the trial rather than a purchase. Keyed on the licence
+	 * kind, not on trial_started: a shop that tried Pro and then bought a key still
+	 * has trial_started set.
+	 */
 	public static function trialActive(\Opencart\System\Engine\Registry $registry): bool {
-		return self::trialStarted($registry) > 0 && self::isPro($registry);
+		return self::isTrialKey($registry) && self::isPro($registry);
 	}
 
 	/** Timestamp the merchant started the trial, or 0 when never started. */
@@ -197,6 +214,8 @@ class License {
 			self::PREFIX . 'license_checked_at',
 			self::PREFIX . 'license_expires_at',
 			self::PREFIX . 'license_data',
+			self::PREFIX . 'license_kind',
+			self::PREFIX . 'license_owned',
 			self::PREFIX . 'trial_started',
 			self::PREFIX . 'notice_dismissed',
 		];
@@ -257,6 +276,10 @@ class License {
 			self::PREFIX . 'license_checked_at' => '',
 			self::PREFIX . 'license_expires_at' => '',
 			self::PREFIX . 'license_data'       => '',
+			// The purchase latch goes with the key: releasing is how a shop moves its
+			// licence to another domain, and leaving Pro on here would hand out a copy.
+			self::PREFIX . 'license_kind'       => '',
+			self::PREFIX . 'license_owned'      => '',
 		]);
 
 		return $result;
@@ -291,7 +314,7 @@ class License {
 		$key        = (string)$response['key'];
 		$activation = self::call($registry, $key, 'activate');
 
-		self::store($registry, $key, $activation, [self::PREFIX . 'trial_started' => (string)time()]);
+		self::store($registry, $key, $activation, [self::PREFIX . 'trial_started' => (string)time(), self::PREFIX . 'license_kind' => 'trial']);
 
 		$activation['key']        = $key;
 		$activation['expires_at'] = (string)($response['expires_at'] ?? ($activation['expires_at'] ?? ''));
@@ -461,30 +484,68 @@ class License {
 	/**
 	 * Persist key + verdict + raw response.
 	 *
-	 * A transport failure is NOT a verdict. Writing `invalid` on an unreachable
-	 * server made GRACE_DAYS dead code: the first failed daily poll during a
-	 * CatCode outage closed Pro on every paying shop, because isPro() checks
-	 * status before it ever looks at the grace window. So an outage leaves the
-	 * previous status, expiry and checked_at untouched — the grace window keeps
-	 * running from the last real answer and closes on its own after GRACE_DAYS.
+	 * A transport failure is NOT a verdict: it leaves status, expiry and checked_at
+	 * untouched. A purchase confirmed by the server latches `license_owned`, and no
+	 * later server answer takes it back — modules are not refunded (that is what the
+	 * 7-day trial is for), and a refusal may be a hiccup on our side. Only the owner
+	 * releasing the key or entering another one clears the latch.
 	 */
 	private static function store(\Opencart\System\Engine\Registry $registry, string $key, array $result, array $extra = []): void {
+		$values = [self::PREFIX . 'license_key' => $key];
+
+		// A different key starts from a clean slate: the kind and the latch belong to
+		// the key that earned them, never to whatever is pasted over it.
+		if (trim((string)$registry->get('config')->get(self::PREFIX . 'license_key')) !== $key) {
+			$values[self::PREFIX . 'license_kind']  = '';
+			$values[self::PREFIX . 'license_owned'] = '';
+		}
+
 		if (self::isTransportFailure($result) && self::hasKey($registry)) {
-			self::write($registry, array_merge([
-				self::PREFIX . 'license_key'  => $key,
-				self::PREFIX . 'license_data' => (string)json_encode($result, JSON_UNESCAPED_UNICODE),
-			], $extra));
+			$values[self::PREFIX . 'license_data'] = (string)json_encode($result, JSON_UNESCAPED_UNICODE);
+			self::write($registry, array_merge($values, $extra));
 
 			return;
 		}
 
-		self::write($registry, array_merge([
-			self::PREFIX . 'license_key'        => $key,
-			self::PREFIX . 'license_status'     => !empty($result['ok']) ? 'valid' : 'invalid',
-			self::PREFIX . 'license_checked_at' => (string)(isset($result['verified_at']) ? $result['verified_at'] : date('Y-m-d H:i:s')),
-			self::PREFIX . 'license_expires_at' => (string)(isset($result['expires_at']) ? $result['expires_at'] : ''),
-			self::PREFIX . 'license_data'       => (string)json_encode($result, JSON_UNESCAPED_UNICODE),
-		], $extra));
+		$values[self::PREFIX . 'license_status']     = !empty($result['ok']) ? 'valid' : 'invalid';
+		$values[self::PREFIX . 'license_checked_at'] = (string)(isset($result['verified_at']) ? $result['verified_at'] : date('Y-m-d H:i:s'));
+		$values[self::PREFIX . 'license_expires_at'] = (string)(isset($result['expires_at']) ? $result['expires_at'] : '');
+		$values[self::PREFIX . 'license_data']       = (string)json_encode($result, JSON_UNESCAPED_UNICODE);
+
+		$kind = self::kindOf($result, $extra);
+
+		if ($kind !== '') {
+			$values[self::PREFIX . 'license_kind'] = $kind;
+		}
+
+		// The latch is what lets a purchase outlive our server — so it is set only from
+		// an answer that said yes to a key the server itself calls a purchase.
+		if ($kind === 'purchase' && !empty($result['ok'])) {
+			$values[self::PREFIX . 'license_owned'] = '1';
+		}
+
+		self::write($registry, array_merge($values, $extra));
+	}
+
+	/**
+	 * Trial or purchase, as far as this answer tells. The server sends a boolean
+	 * `trial` with every answer about a key it found; an answer without it (a
+	 * refusal, an older server) says nothing, and '' keeps the stored kind.
+	 */
+	private static function kindOf(array $result, array $extra): string {
+		if (isset($extra[self::PREFIX . 'license_kind'])) {
+			return (string)$extra[self::PREFIX . 'license_kind'];
+		}
+
+		if (array_key_exists('trial', $result)) {
+			return !empty($result['trial']) ? 'trial' : 'purchase';
+		}
+
+		if (!empty($result['is_trial'])) {
+			return 'trial';
+		}
+
+		return '';
 	}
 
 	/**
