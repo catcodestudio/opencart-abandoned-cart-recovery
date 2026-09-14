@@ -27,3 +27,7 @@ $_['text_tg_customer'] = 'Customer:';
 // Telegram webhook replies (%s is the chat id)
 $_['text_tg_chat_saved'] = 'Your chat_id: %s — it has been saved in the shop settings.';
 $_['text_tg_chat_id']    = 'Your chat_id: %s. Another chat is already configured in the shop settings; send /start to switch notifications to this one.';
+
+// Pro: Viber/SMS (TurboSMS). Keep it short — every SMS character is billed.
+$_['text_tg_phone'] = 'Phone:';
+$_['text_sms_body'] = '{store_name}: you left items worth {cart_total} in your cart. It is saved for you: {recovery_link}';

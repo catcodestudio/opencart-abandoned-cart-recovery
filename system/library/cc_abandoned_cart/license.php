@@ -62,6 +62,13 @@ class License {
 	 * not lose paid features because our site had an outage.
 	 */
 	public static function isPro(\Opencart\System\Engine\Registry $registry): bool {
+		// A purchase, once confirmed, is confirmed for good. The flag is only ever
+		// written after the server blessed a non-trial key, and only cleared when the
+		// owner detaches the licence themselves.
+		if (self::isOwned($registry)) {
+			return true;
+		}
+
 		$config = $registry->get('config');
 
 		if ((string)$config->get(self::PREFIX . 'license_status') !== 'valid') {
@@ -74,7 +81,51 @@ class License {
 			return false;
 		}
 
+		// A trial also has to be inside its own window. The server enforces this on
+		// every verify, but the local check means a trial cannot be stretched by
+		// cutting the site off from the internet: the grace window below exists for
+		// paying customers, not for trials.
+		if (self::isTrialKey($registry) && self::trialDaysLeft($registry) < 1) {
+			return false;
+		}
+
 		return (time() - (int)strtotime($checkedAt)) <= self::GRACE_DAYS * 86400;
+	}
+
+	/** A confirmed purchase — the features stay on even after the term lapses. */
+	public static function isOwned(\Opencart\System\Engine\Registry $registry): bool {
+		return '1' === (string)$registry->get('config')->get(self::PREFIX . 'license_owned');
+	}
+
+	/** The stored key came from the trial endpoint rather than from a purchase. */
+	public static function isTrialKey(\Opencart\System\Engine\Registry $registry): bool {
+		return 'trial' === (string)$registry->get('config')->get(self::PREFIX . 'license_kind');
+	}
+
+	/**
+	 * Are updates and support still covered?
+	 *
+	 * Separate from isPro() on purpose: after an annual term ends the module keeps
+	 * working, but the shop is no longer entitled to new versions. Saying so plainly
+	 * is what makes "the features stay" an honest promise rather than a reason never
+	 * to renew.
+	 */
+	public static function updatesActive(\Opencart\System\Engine\Registry $registry): bool {
+		if (self::isTrialKey($registry)) {
+			return self::trialDaysLeft($registry) > 0;
+		}
+
+		if (!self::hasKey($registry)) {
+			return false;
+		}
+
+		$expires = (string)$registry->get('config')->get(self::PREFIX . 'license_expires_at');
+
+		if ($expires === '') {
+			return (string)$registry->get('config')->get(self::PREFIX . 'license_status') === 'valid';
+		}
+
+		return (int)strtotime($expires) >= time();
 	}
 
 	/** A key is stored, whether or not the server has blessed it yet. */

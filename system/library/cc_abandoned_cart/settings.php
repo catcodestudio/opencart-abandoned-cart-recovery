@@ -23,7 +23,7 @@ class Settings {
 	 * must keep working when the shop moves and the crypto key changes). A key
 	 * is worthless without the matching site_url anyway.
 	 */
-	public const SECRET_KEYS = ['telegram_bot_token'];
+	public const SECRET_KEYS = ['telegram_bot_token', 'turbosms_token'];
 
 	private $config;
 	private ?array $cache = null;
@@ -78,6 +78,19 @@ class Settings {
 			// Shared secret Telegram echoes back in the webhook request header.
 			// Non-empty means "a webhook is currently registered".
 			'telegram_webhook_secret' => '',
+
+			// Pro: Viber / SMS reminder through TurboSMS.
+			'sms_enabled'    => '0',
+			'turbosms_token' => '',
+			'sms_channel'    => 'viber_sms', // viber_sms = Viber, SMS if Viber did not deliver.
+			'sms_sender'     => '',
+			'viber_sender'   => '',
+			'sms_delay'      => '30',        // Minutes after abandonment.
+			'sms_text'       => '',
+			// Local hours (store timezone) when nothing is sent: a reminder at
+			// night reads as spam and gets the sender blocked in Viber.
+			'sms_quiet_from' => '21',
+			'sms_quiet_to'   => '9',
 
 			// Licensing — written by the licence client, never by the settings form.
 			'license_key'        => '',

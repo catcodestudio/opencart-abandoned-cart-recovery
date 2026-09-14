@@ -1,6 +1,8 @@
 <?php
 namespace Opencart\System\Library\CcAbandonedCart;
 
+require_once __DIR__ . '/turbosms.php';
+
 /**
  * Cart capture.
  *
@@ -15,6 +17,7 @@ class Capture {
 	/** Session key holding the address a guest typed at checkout. */
 	public const SESSION_EMAIL = 'abandoned_cart_email';
 	public const SESSION_NAME  = 'abandoned_cart_name';
+	public const SESSION_PHONE = 'abandoned_cart_phone';
 
 	private $registry;
 	private Settings $settings;
@@ -60,13 +63,61 @@ class Capture {
 		$this->store();
 	}
 
+	/**
+	 * Remember a phone a guest typed, then persist the cart.
+	 *
+	 * Many Ukrainian shops ask for the phone first and the e-mail never (or as
+	 * an optional field), so a phone alone is enough to make the cart
+	 * recoverable through Viber/SMS.
+	 */
+	public function rememberPhone(string $phone, string $name = ''): void {
+		$phone = TurboSms::normalisePhone($phone);
+		if ($phone === '') {
+			return;
+		}
+
+		$session = $this->registry->get('session');
+		if ($session) {
+			$session->data[self::SESSION_PHONE] = $phone;
+			if ($name !== '') {
+				$session->data[self::SESSION_NAME] = $name;
+			}
+		}
+
+		$this->store();
+	}
+
 	/** Forget the captured guest identity (after a completed order). */
 	public function forgetEmail(): void {
 		$session = $this->registry->get('session');
 		if (!$session) {
 			return;
 		}
-		unset($session->data[self::SESSION_EMAIL], $session->data[self::SESSION_NAME]);
+		unset($session->data[self::SESSION_EMAIL], $session->data[self::SESSION_NAME], $session->data[self::SESSION_PHONE]);
+	}
+
+	/** The phone we currently know for this shopper, normalised, '' when unknown. */
+	public function currentPhone(): string {
+		$customer = $this->registry->get('customer');
+		if ($customer && $customer->isLogged()) {
+			$phone = TurboSms::normalisePhone((string)$customer->getTelephone());
+			if ($phone !== '') {
+				return $phone;
+			}
+		}
+
+		$session = $this->registry->get('session');
+		if (!$session) {
+			return '';
+		}
+		if (!empty($session->data[self::SESSION_PHONE])) {
+			return (string)$session->data[self::SESSION_PHONE];
+		}
+		if (!empty($session->data['customer']['telephone'])) {
+			return TurboSms::normalisePhone((string)$session->data['customer']['telephone']);
+		}
+
+		return '';
 	}
 
 	/** The address we currently know for this shopper, '' when unknown. */
@@ -131,9 +182,10 @@ class Capture {
 		}
 
 		$email = $this->currentEmail();
+		$phone = $this->currentPhone();
 
-		// No address means nothing to recover and no personal data to collect.
-		if ($email === '') {
+		// No contact means nothing to recover and no personal data to collect.
+		if ($email === '' && $phone === '') {
 			return;
 		}
 
@@ -165,6 +217,7 @@ class Capture {
 			'customer_id'   => ($customer && $customer->isLogged()) ? (int)$customer->getId() : 0,
 			'email'         => $email,
 			'customer_name' => $this->currentName(),
+			'phone'         => $phone,
 			'cart_contents' => (string)json_encode($items, JSON_UNESCAPED_UNICODE),
 			'cart_total'    => $total,
 			// OpenCart's Cart\Currency has no getCode(): the active code lives in

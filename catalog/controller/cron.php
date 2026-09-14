@@ -7,6 +7,7 @@ require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/re
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/mailer.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/coupons.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/telegram.php';
+require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/messenger.php';
 
 use Opencart\System\Library\CcAbandonedCart\Settings;
 use Opencart\System\Library\CcAbandonedCart\License;
@@ -14,6 +15,7 @@ use Opencart\System\Library\CcAbandonedCart\Repository;
 use Opencart\System\Library\CcAbandonedCart\Mailer;
 use Opencart\System\Library\CcAbandonedCart\Coupons;
 use Opencart\System\Library\CcAbandonedCart\Telegram;
+use Opencart\System\Library\CcAbandonedCart\Messenger;
 
 /**
  * Scheduled work.
@@ -36,8 +38,54 @@ class Cron extends \Opencart\System\Engine\Controller {
 		$repository = new Repository($this->db);
 		$isPro      = License::isPro($this->registry);
 
+		// An upgraded shop gets its new columns before the first query needs them.
+		$repository->ensureSchema();
+
 		$this->promoteIdle($settings, $repository, $isPro);
 		$this->sendDue($settings, $repository, $isPro);
+		$this->sendMessages($settings, $repository, $isPro);
+	}
+
+	/**
+	 * Pro: one Viber/SMS reminder per abandoned cart that has a phone.
+	 *
+	 * Runs independently of the e-mail chain — a shopper who gave both gets
+	 * both, a shopper who gave only a phone still gets reminded.
+	 */
+	private function sendMessages(Settings $settings, Repository $repository, bool $isPro): void {
+		$messenger = new Messenger($settings, $repository, $this->config);
+
+		if (!$messenger->isEnabled($isPro) || $messenger->inQuietHours()) {
+			return;
+		}
+
+		$delay    = max(1, $settings->getInt('sms_delay', 30));
+		$cooldown = $settings->getInt('email_cooldown', 3);
+
+		$template = trim((string)$settings->get('sms_text', ''));
+		if ($template === '') {
+			$template = (string)$this->language->get('text_sms_body');
+		}
+		$fallback = (string)$this->language->get('text_customer_fallback');
+
+		foreach ($repository->pendingMessages() as $row) {
+			if (strtotime((string)$row['abandoned_at']) + $delay * 60 > time()) {
+				continue;
+			}
+
+			// The same number is not texted again for a cart it abandoned a
+			// minute later — mark this one handled without paying for a send.
+			if ($repository->messagedRecently((string)$row['phone'], $cooldown, (int)$row['abandoned_cart_id'])) {
+				$repository->update((int)$row['abandoned_cart_id'], ['msg_sent' => 1, 'msg_status' => 'skipped: cooldown']);
+				continue;
+			}
+
+			try {
+				$messenger->send($row, $template, $fallback);
+			} catch (\Throwable $e) {
+				// Move on to the next cart.
+			}
+		}
 	}
 
 	/** Close carts past their recovery window, then honour retention. */
@@ -88,6 +136,7 @@ class Cron extends \Opencart\System\Engine\Controller {
 					'email'    => $this->language->get('text_tg_email'),
 					'total'    => $this->language->get('text_tg_total'),
 					'customer' => $this->language->get('text_tg_customer'),
+					'phone'    => $this->language->get('text_tg_phone'),
 				]);
 			} catch (\Throwable $e) {
 				// A failing notification must not stop the queue.

@@ -6,12 +6,14 @@ require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/se
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/license.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/repository.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/telegram.php';
+require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/turbosms.php';
 
 use Opencart\System\Library\CcAbandonedCart\Crypto;
 use Opencart\System\Library\CcAbandonedCart\Settings;
 use Opencart\System\Library\CcAbandonedCart\License;
 use Opencart\System\Library\CcAbandonedCart\Repository;
 use Opencart\System\Library\CcAbandonedCart\Telegram;
+use Opencart\System\Library\CcAbandonedCart\TurboSms;
 
 /**
  * Abandoned Cart Recovery — admin controller.
@@ -58,6 +60,22 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		// keeps whatever is already stored.
 		$data['telegram_bot_token_set'] = $all['telegram_bot_token'] !== '' ? 1 : 0;
 		$data['telegram_bot_token']     = '';
+
+		$data['turbosms_token_set'] = $all['turbosms_token'] !== '' ? 1 : 0;
+		$data['turbosms_token']     = '';
+		$data['sms_channels']       = [
+			['value' => TurboSms::CHANNEL_HYBRID, 'text' => $this->language->get('text_channel_hybrid')],
+			['value' => TurboSms::CHANNEL_VIBER, 'text' => $this->language->get('text_channel_viber')],
+			['value' => TurboSms::CHANNEL_SMS, 'text' => $this->language->get('text_channel_sms')],
+		];
+		if (trim((string)$data['sms_text']) === '') {
+			$data['sms_text'] = (string)$this->language->get('text_sms_body');
+		}
+		$data['sms_balance'] = $this->url->link($this->route . '.smsBalance', $token);
+		$data['sms_test']    = $this->url->link($this->route . '.smsTest', $token);
+
+		// Upgrading from 1.1 replaces the files but never re-runs install().
+		(new Repository($this->db))->ensureSchema();
 
 		// The webhook secret is a credential too: only its presence is exposed,
 		// never the value itself.
@@ -156,6 +174,17 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 				$values['coupon_from_email']  = (string)min(3, max(1, (int)($post['coupon_from_email'] ?? 2)));
 				$values['coupon_expiry_days'] = (string)max(1, (int)($post['coupon_expiry_days'] ?? 7));
 
+				$channel = (string)($post['sms_channel'] ?? TurboSms::CHANNEL_HYBRID);
+
+				$values['sms_enabled']    = !empty($post['sms_enabled']) ? '1' : '0';
+				$values['sms_channel']    = in_array($channel, TurboSms::channels(), true) ? $channel : TurboSms::CHANNEL_HYBRID;
+				$values['sms_sender']     = trim((string)($post['sms_sender'] ?? ''));
+				$values['viber_sender']   = trim((string)($post['viber_sender'] ?? ''));
+				$values['sms_delay']      = (string)max(1, (int)($post['sms_delay'] ?? 30));
+				$values['sms_text']       = trim((string)($post['sms_text'] ?? ''));
+				$values['sms_quiet_from'] = (string)min(23, max(0, (int)($post['sms_quiet_from'] ?? 21)));
+				$values['sms_quiet_to']   = (string)min(23, max(0, (int)($post['sms_quiet_to'] ?? 9)));
+
 				$values['telegram_enabled'] = !empty($post['telegram_enabled']) ? '1' : '0';
 				// The webhook may have stored a chat id after this page was rendered,
 				// so a form that still carries an empty field must never wipe it.
@@ -164,7 +193,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 					? (string)$current['telegram_chat_id']
 					: $postedChat;
 			} else {
-				foreach (['coupon_enabled', 'coupon_type', 'coupon_amount', 'coupon_from_email', 'coupon_expiry_days', 'telegram_enabled', 'telegram_chat_id'] as $key) {
+				foreach (['coupon_enabled', 'coupon_type', 'coupon_amount', 'coupon_from_email', 'coupon_expiry_days', 'telegram_enabled', 'telegram_chat_id', 'sms_enabled', 'sms_channel', 'sms_sender', 'viber_sender', 'sms_delay', 'sms_text', 'sms_quiet_from', 'sms_quiet_to'] as $key) {
 					$values[$key] = (string)$current[$key];
 				}
 			}
@@ -180,7 +209,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 				$key    = Settings::PREFIX . $secret;
 				$posted = trim((string)($post[$secret] ?? ''));
 
-				if ($secret === 'telegram_bot_token' && !$isPro) {
+				if (in_array($secret, ['telegram_bot_token', 'turbosms_token'], true) && !$isPro) {
 					$data[$key] = (string)$this->config->get($key);
 					continue;
 				}
@@ -425,6 +454,107 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$this->jsonResponse($json);
 	}
 
+	/* ---------------------------------------------------------- Pro: Viber/SMS */
+
+	/**
+	 * "Check connection": ask TurboSMS for the balance with the token from the
+	 * form (just typed) or the stored one. Nothing is saved here.
+	 */
+	public function smsBalance(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		} elseif (!License::isPro($this->registry)) {
+			$json['error'] = $this->language->get('error_pro');
+		}
+
+		if (!$json) {
+			$token = $this->smsToken();
+
+			if ($token === '') {
+				$json['error'] = $this->language->get('error_sms_token');
+			} else {
+				$result = (new TurboSms($token))->balance();
+
+				if ($result['ok']) {
+					$json['success'] = sprintf($this->language->get('text_sms_balance'), number_format($result['balance'], 2, '.', ' '));
+				} else {
+					$json['error'] = $this->language->get('error_sms_api') . ' ' . $result['code'] . ' ' . $result['status'];
+				}
+			}
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/**
+	 * Send one test message to the number the merchant typed, with the senders
+	 * and channel currently in the form — the only honest way to find out
+	 * whether TurboSMS accepts the sender names before real shoppers are hit.
+	 */
+	public function smsTest(): void {
+		$this->load->language($this->route);
+		$json = [];
+
+		if (!$this->user->hasPermission('modify', $this->route)) {
+			$json['error'] = $this->language->get('error_permission');
+		} elseif (!License::isPro($this->registry)) {
+			$json['error'] = $this->language->get('error_pro');
+		}
+
+		$post  = $this->request->post;
+		$phone = TurboSms::normalisePhone((string)($post['test_phone'] ?? ''));
+
+		if (!$json && $phone === '') {
+			$json['error'] = $this->language->get('error_sms_phone');
+		}
+
+		if (!$json) {
+			$token = $this->smsToken();
+
+			if ($token === '') {
+				$json['error'] = $this->language->get('error_sms_token');
+			} else {
+				$channel = (string)($post['sms_channel'] ?? TurboSms::CHANNEL_HYBRID);
+				$channel = in_array($channel, TurboSms::channels(), true) ? $channel : TurboSms::CHANNEL_HYBRID;
+
+				$text = strtr(trim((string)($post['sms_text'] ?? '')) ?: (string)$this->language->get('text_sms_body'), [
+					'{customer_name}' => $this->language->get('text_sms_test_name'),
+					'{store_name}'    => html_entity_decode((string)$this->config->get('config_name'), ENT_QUOTES, 'UTF-8'),
+					'{cart_total}'    => '1 250.00 ' . (string)$this->config->get('config_currency'),
+					'{item_count}'    => '2',
+					'{recovery_link}' => (defined('HTTP_CATALOG') ? HTTP_CATALOG : '') . 'index.php?route=checkout/cart',
+					'{coupon_code}'   => '',
+				]);
+
+				$result = (new TurboSms($token))->send(
+					$phone,
+					$text,
+					$channel,
+					trim((string)($post['sms_sender'] ?? '')),
+					trim((string)($post['viber_sender'] ?? ''))
+				);
+
+				if ($result['ok']) {
+					$json['success'] = sprintf($this->language->get('text_sms_test_sent'), '+' . $phone);
+				} else {
+					$json['error'] = $this->language->get('error_sms_api') . ' ' . $result['code'] . ' ' . $result['status'];
+				}
+			}
+		}
+
+		$this->jsonResponse($json);
+	}
+
+	/** Token from the form when just typed, otherwise the stored one. */
+	private function smsToken(): string {
+		$posted = trim((string)($this->request->post['turbosms_token'] ?? ''));
+
+		return $posted !== '' ? $posted : trim((string)(new Settings($this->config))->get('turbosms_token', ''));
+	}
+
 	/** Public storefront URL Telegram will POST every update to. */
 	private function webhookUrl(): string {
 		$base = defined('HTTP_CATALOG') ? HTTP_CATALOG : '';
@@ -461,6 +591,7 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$order  = (string)($this->request->get['order'] ?? 'DESC');
 
 		$repository = new Repository($this->db);
+		$repository->ensureSchema();
 		$result     = $repository->paged($status, $search, self::PER_PAGE, $page, $sort, $order);
 		$stats      = $repository->stats();
 
@@ -502,6 +633,9 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 			$data['carts'][] = [
 				'abandoned_cart_id'  => (int)$row['abandoned_cart_id'],
 				'email'              => (string)$row['email'],
+				'phone'              => (string)($row['phone'] ?? '') !== '' ? '+' . (string)$row['phone'] : '',
+				'msg_status'         => (string)($row['msg_status'] ?? ''),
+				'last_msg_at'        => (string)($row['last_msg_at'] ?? ''),
 				'customer_name'      => (string)$row['customer_name'],
 				'registered'         => (int)$row['customer_id'] > 0,
 				'items'              => $lines,
@@ -567,8 +701,8 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$rows   = (new Repository($this->db))->allForExport($status);
 
 		$columns = [
-			'abandoned_cart_id', 'email', 'customer_name', 'customer_id', 'status', 'items', 'item_count',
-			'cart_total', 'currency_code', 'emails_sent', 'coupon_code', 'recovered_order_id',
+			'abandoned_cart_id', 'email', 'phone', 'customer_name', 'customer_id', 'status', 'items', 'item_count',
+			'cart_total', 'currency_code', 'emails_sent', 'msg_status', 'coupon_code', 'recovered_order_id',
 			'recovered_total', 'created_at', 'abandoned_at', 'recovered_at',
 		];
 

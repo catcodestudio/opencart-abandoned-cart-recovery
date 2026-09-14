@@ -6,11 +6,13 @@ require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/li
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/repository.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/capture.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/coupons.php';
+require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/turbosms.php';
 
 use Opencart\System\Library\CcAbandonedCart\Settings;
 use Opencart\System\Library\CcAbandonedCart\Repository;
 use Opencart\System\Library\CcAbandonedCart\Capture;
 use Opencart\System\Library\CcAbandonedCart\Coupons;
+use Opencart\System\Library\CcAbandonedCart\TurboSms;
 
 /**
  * Storefront event handlers.
@@ -79,13 +81,17 @@ class Events extends \Opencart\System\Engine\Controller {
 		}
 
 		$email = trim((string)($this->request->post['email'] ?? ''));
+		$phone = trim((string)($this->request->post['telephone'] ?? ''));
 		$name  = trim((string)($this->request->post['firstname'] ?? '') . ' ' . (string)($this->request->post['lastname'] ?? ''));
 
 		try {
 			$capture = $this->capture();
+			if ($phone !== '') {
+				$capture->rememberPhone($phone, $name);
+			}
 			if ($email !== '') {
 				$capture->rememberEmail($email, $name);
-			} else {
+			} elseif ($phone === '') {
 				$capture->store();
 			}
 		} catch (\Throwable $e) {
@@ -120,7 +126,8 @@ class Events extends \Opencart\System\Engine\Controller {
 
 			$email      = trim((string)($order['email'] ?? ''));
 			$customerId = (int)($order['customer_id'] ?? 0);
-			if ($email === '' && $customerId < 1) {
+			$phone      = TurboSms::normalisePhone((string)($order['telephone'] ?? ''));
+			if ($email === '' && $customerId < 1 && $phone === '') {
 				return;
 			}
 
@@ -130,13 +137,14 @@ class Events extends \Opencart\System\Engine\Controller {
 			// shipping), so it is the figure to report as recovered revenue.
 			$recoveredTotal = round((float)($order['total'] ?? 0) * (float)($order['currency_value'] ?: 1), 4);
 
-			foreach ($repository->openForCustomer($email, $customerId) as $row) {
+			foreach ($repository->openForCustomer($email, $customerId, $phone) as $row) {
 				$repository->update((int)$row['abandoned_cart_id'], [
 					'status'             => Repository::STATUS_RECOVERED,
 					'recovered_order_id' => $orderId,
 					'recovered_total'    => $recoveredTotal,
 					'recovered_at'       => true,
 					'token_hash'         => '',
+					'msg_token_hash'     => '',
 					'token_expires_at'   => null,
 				]);
 			}
@@ -217,12 +225,17 @@ class Events extends \Opencart\System\Engine\Controller {
 			'UTF-8'
 		);
 
+		// The phone is posted too: plenty of Ukrainian checkouts make it the
+		// required field and the e-mail optional, and a phone alone is enough
+		// for the Pro Viber/SMS reminder.
 		$output .= '<script>(function(){'
-			. 'var sent="";'
-			. 'function push(v){'
-			. 'if(!v||v===sent||!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){return;}'
-			. 'sent=v;'
-			. 'var b=new FormData();b.append("email",v);'
+			. 'var sent={};'
+			. 'function push(k,v){'
+			. 'if(!v||sent[k]===v){return;}'
+			. 'if(k==="email"&&!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v)){return;}'
+			. 'if(k==="telephone"&&v.replace(/\D/g,"").length<9){return;}'
+			. 'sent[k]=v;'
+			. 'var b=new FormData();b.append(k,v);'
 			. 'var f=document.querySelector(\'input[name="firstname"]\');'
 			. 'var l=document.querySelector(\'input[name="lastname"]\');'
 			. 'if(f){b.append("firstname",f.value||"");}'
@@ -231,7 +244,7 @@ class Events extends \Opencart\System\Engine\Controller {
 			. '}'
 			. 'document.addEventListener("change",function(e){'
 			. 'var t=e.target;'
-			. 'if(t&&t.name==="email"){push((t.value||"").trim());}'
+			. 'if(t&&(t.name==="email"||t.name==="telephone")){push(t.name,(t.value||"").trim());}'
 			. '},true);'
 			. '})();</script>';
 	}

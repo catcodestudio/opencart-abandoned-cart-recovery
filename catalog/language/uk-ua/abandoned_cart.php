@@ -27,3 +27,7 @@ $_['text_tg_customer'] = 'Покупець:';
 // Відповіді Telegram-вебхука (%s — chat id)
 $_['text_tg_chat_saved'] = 'Ваш chat_id: %s, його збережено в налаштуваннях магазину.';
 $_['text_tg_chat_id']    = 'Ваш chat_id: %s. У налаштуваннях магазину вже вказано інший чат — надішліть /start, щоб перевести сповіщення сюди.';
+
+// Pro: Viber/SMS (TurboSMS). Коротко — кожен символ SMS платний.
+$_['text_tg_phone'] = 'Телефон:';
+$_['text_sms_body'] = '{store_name}: ви залишили товари в кошику на {cart_total}. Кошик збережено, повернутись: {recovery_link}';

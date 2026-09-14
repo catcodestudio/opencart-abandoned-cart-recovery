@@ -39,6 +39,7 @@
             <li class="nav-item"><a href="#tab-general" data-bs-toggle="tab" class="nav-link active">{{ tab_general }}</a></li>
             <li class="nav-item"><a href="#tab-emails" data-bs-toggle="tab" class="nav-link">{{ tab_emails }}</a></li>
             <li class="nav-item"><a href="#tab-coupon" data-bs-toggle="tab" class="nav-link">{{ tab_coupon }}{% if not is_pro %} <span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}</a></li>
+            <li class="nav-item"><a href="#tab-sms" data-bs-toggle="tab" class="nav-link">{{ tab_sms }}{% if not is_pro %} <span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}</a></li>
             <li class="nav-item"><a href="#tab-telegram" data-bs-toggle="tab" class="nav-link">{{ tab_telegram }}{% if not is_pro %} <span class="badge bg-warning text-dark">{{ text_pro_badge }}</span>{% endif %}</a></li>
             <li class="nav-item"><a href="#tab-license" data-bs-toggle="tab" class="nav-link">{{ tab_license }}</a></li>
           </ul>
@@ -183,6 +184,88 @@
               </div>
             </div>
 
+            <div id="tab-sms" class="tab-pane">
+              <div class="alert alert-light">{{ help_sms_intro }}{% if not is_pro %} <strong>{{ text_pro_only }}</strong>{% endif %}</div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_enabled }}</label>
+                <div class="col-sm-9">
+                  <div class="form-check form-switch form-switch-lg">
+                    <input type="hidden" name="sms_enabled" value="0"/>
+                    <input type="checkbox" name="sms_enabled" value="1" class="form-check-input"{% if sms_enabled == '1' %} checked{% endif %}{% if not is_pro %} disabled{% endif %}/>
+                  </div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_turbosms_token }}</label>
+                <div class="col-sm-9">
+                  <div class="input-group">
+                    <input type="password" name="turbosms_token" value="" autocomplete="new-password" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                    <button type="button" id="button-sms-balance" class="btn btn-outline-primary"{% if not is_pro %} disabled{% endif %}>{{ button_sms_balance }}</button>
+                  </div>
+                  <div class="form-text">{% if turbosms_token_set %}<span class="text-success">{{ text_secret_stored }}</span> {% endif %}{{ help_turbosms_token }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_channel }}</label>
+                <div class="col-sm-9">
+                  <select name="sms_channel" class="form-select"{% if not is_pro %} disabled{% endif %}>
+                    {% for channel in sms_channels %}
+                      <option value="{{ channel.value }}"{% if channel.value == sms_channel %} selected{% endif %}>{{ channel.text }}</option>
+                    {% endfor %}
+                  </select>
+                  <div class="form-text">{{ help_sms_channel }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_viber_sender }}</label>
+                <div class="col-sm-9">
+                  <input type="text" name="viber_sender" value="{{ viber_sender }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_sender }}</label>
+                <div class="col-sm-9">
+                  <input type="text" name="sms_sender" value="{{ sms_sender }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  <div class="form-text">{{ help_sms_sender }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_delay }}</label>
+                <div class="col-sm-9">
+                  <input type="number" min="1" name="sms_delay" value="{{ sms_delay }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  <div class="form-text">{{ help_sms_delay }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_quiet }}</label>
+                <div class="col-sm-9">
+                  <div class="input-group" style="max-width:320px">
+                    <input type="number" min="0" max="23" name="sms_quiet_from" value="{{ sms_quiet_from }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                    <span class="input-group-text">—</span>
+                    <input type="number" min="0" max="23" name="sms_quiet_to" value="{{ sms_quiet_to }}" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                  </div>
+                  <div class="form-text">{{ help_sms_quiet }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_text }}</label>
+                <div class="col-sm-9">
+                  <textarea name="sms_text" rows="4" class="form-control"{% if not is_pro %} disabled{% endif %}>{{ sms_text }}</textarea>
+                  <div class="form-text">{{ help_sms_text }}</div>
+                </div>
+              </div>
+              <div class="row mb-3">
+                <label class="col-sm-3 col-form-label">{{ entry_sms_test }}</label>
+                <div class="col-sm-9">
+                  <div class="input-group" style="max-width:420px">
+                    <input type="tel" id="input-sms-test-phone" placeholder="+380XXXXXXXXX" class="form-control"{% if not is_pro %} disabled{% endif %}/>
+                    <button type="button" id="button-sms-test" class="btn btn-outline-primary"{% if not is_pro %} disabled{% endif %}>{{ button_sms_test }}</button>
+                  </div>
+                  <div class="form-text">{{ help_sms_test }}</div>
+                </div>
+              </div>
+            </div>
+
             <div id="tab-telegram" class="tab-pane">
               <div class="alert alert-light">{{ help_telegram_intro }}{% if not is_pro %} <strong>{{ text_pro_only }}</strong><div class="small text-muted mt-1">{{ help_pro_telegram }}</div>{% endif %}</div>
               <div class="row mb-3">
@@ -311,7 +394,7 @@ document.getElementById('form-abandoned-cart').addEventListener('submit', functi
         box.innerHTML = '<div class="alert alert-danger">' + json.error + '</div>';
       } else if (json.success) {
         box.innerHTML = '<div class="alert alert-success">' + json.success + '</div>';
-        document.querySelectorAll('input[name="telegram_bot_token"], input[name="license_key"]').forEach(function (el) { el.value = ''; });
+        document.querySelectorAll('input[name="telegram_bot_token"], input[name="turbosms_token"], input[name="license_key"]').forEach(function (el) { el.value = ''; });
       }
       window.scrollTo(0, 0);
     })
@@ -345,6 +428,37 @@ function ccAcBot(url, withToken) {
     })
     .catch(function () { box.innerHTML = '<div class="alert alert-danger">Request failed</div>'; });
 }
+
+// Viber/SMS: balance check and a test message use the values currently in the
+// form, so the merchant can verify token and sender names before saving.
+function ccAcSms(url, withPhone) {
+  var box  = document.getElementById('alert-abandoned-cart');
+  var form = document.getElementById('form-abandoned-cart');
+  var body = new FormData();
+  ['turbosms_token', 'sms_channel', 'sms_sender', 'viber_sender', 'sms_text'].forEach(function (name) {
+    var el = form.querySelector('[name="' + name + '"]');
+    body.append(name, el ? el.value : '');
+  });
+  if (withPhone) {
+    body.append('test_phone', document.getElementById('input-sms-test-phone').value);
+  }
+  box.innerHTML = '';
+  fetch(ccAcUrl(url), { method: 'POST', body: body, credentials: 'same-origin' })
+    .then(function (r) { return r.json(); })
+    .then(function (json) {
+      box.innerHTML = '<div class="alert alert-' + (json.error ? 'danger' : 'success') + '"></div>';
+      box.firstChild.textContent = json.error || json.success || '';
+      window.scrollTo(0, 0);
+    })
+    .catch(function () { box.innerHTML = '<div class="alert alert-danger">Request failed</div>'; });
+}
+
+document.getElementById('button-sms-balance').addEventListener('click', function () {
+  ccAcSms('{{ sms_balance|raw }}', false);
+});
+document.getElementById('button-sms-test').addEventListener('click', function () {
+  ccAcSms('{{ sms_test|raw }}', true);
+});
 
 document.getElementById('button-connect-bot').addEventListener('click', function () {
   ccAcBot('{{ connect_bot|raw }}', true);

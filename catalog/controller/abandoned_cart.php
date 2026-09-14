@@ -46,7 +46,9 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 		$hash       = hash('sha256', $token);
 		$row        = $repository->findByTokenHash($hash);
 
-		if (!$row || !hash_equals((string)$row['token_hash'], $hash)) {
+		$matches = $row && (hash_equals((string)$row['token_hash'], $hash) || hash_equals((string)($row['msg_token_hash'] ?? ''), $hash));
+
+		if (!$matches) {
 			$this->session->data['error'] = $this->language->get('error_link_invalid');
 			$this->response->redirect($cartUrl);
 
@@ -89,17 +91,23 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 
 		if ((string)$this->config->get(Settings::PREFIX . 'status') === '1') {
 			$email = trim((string)($this->request->post['email'] ?? ''));
+			$phone = trim((string)($this->request->post['telephone'] ?? ''));
 			$name  = trim((string)($this->request->post['firstname'] ?? '') . ' ' . (string)($this->request->post['lastname'] ?? ''));
 
-			if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-				try {
-					$settings = new Settings($this->config);
-					$capture  = new Capture($this->registry, $settings, new Repository($this->db));
+			try {
+				$settings = new Settings($this->config);
+				$capture  = new Capture($this->registry, $settings, new Repository($this->db));
+
+				if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
 					$capture->rememberEmail($email, $name);
 					$json['ok'] = true;
-				} catch (\Throwable $e) {
-					$json['ok'] = false;
 				}
+				if ($phone !== '') {
+					$capture->rememberPhone($phone, $name);
+					$json['ok'] = true;
+				}
+			} catch (\Throwable $e) {
+				$json['ok'] = false;
 			}
 		}
 
@@ -217,11 +225,18 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 
 	/** Pre-fill the checkout with the identity we already know. */
 	private function adoptIdentity(array $row): void {
-		$email = trim((string)$row['email']);
-		if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+		if ($this->customer->isLogged()) {
 			return;
 		}
-		if ($this->customer->isLogged()) {
+
+		// A cart recovered from a Viber/SMS link may have no e-mail at all.
+		$phone = trim((string)($row['phone'] ?? ''));
+		if ($phone !== '') {
+			$this->session->data[Capture::SESSION_PHONE] = $phone;
+		}
+
+		$email = trim((string)$row['email']);
+		if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
 			return;
 		}
 

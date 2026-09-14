@@ -36,11 +36,16 @@ class Telegram {
 	 * @param array<string,string> $labels Translated line labels.
 	 */
 	public function notifyAbandoned(array $cart, array $labels): bool {
-		$lines = [
-			'🛒 <b>' . self::esc((string)($labels['title'] ?? 'Abandoned cart')) . '</b>',
-			self::esc((string)($labels['email'] ?? 'E-mail:')) . ' ' . self::esc((string)$cart['email']),
-			self::esc((string)($labels['total'] ?? 'Total:')) . ' ' . self::esc(number_format((float)$cart['cart_total'], 2, '.', ' ') . ' ' . (string)$cart['currency_code']),
-		];
+		$lines = ['🛒 <b>' . self::esc((string)($labels['title'] ?? 'Abandoned cart')) . '</b>'];
+
+		if ((string)$cart['email'] !== '') {
+			$lines[] = self::esc((string)($labels['email'] ?? 'E-mail:')) . ' ' . self::esc((string)$cart['email']);
+		}
+		if ((string)($cart['phone'] ?? '') !== '') {
+			$lines[] = self::esc((string)($labels['phone'] ?? 'Phone:')) . ' +' . self::esc((string)$cart['phone']);
+		}
+
+		$lines[] = self::esc((string)($labels['total'] ?? 'Total:')) . ' ' . self::esc(number_format((float)$cart['cart_total'], 2, '.', ' ') . ' ' . (string)$cart['currency_code']);
 
 		if ((string)$cart['customer_name'] !== '') {
 			$lines[] = self::esc((string)($labels['customer'] ?? 'Customer:')) . ' ' . self::esc((string)$cart['customer_name']);

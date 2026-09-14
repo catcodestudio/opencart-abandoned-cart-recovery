@@ -89,6 +89,7 @@
               <tr>
                 <td>
                   <strong>{{ cart.email }}</strong>
+                  {% if cart.phone %}{% if cart.email %}<br/>{% endif %}<span>{{ cart.phone }}</span>{% endif %}
                   {% if cart.customer_name %}<br/><span class="text-muted small">{{ cart.customer_name }}</span>{% endif %}
                   {% if cart.registered %}<br/><span class="text-muted small">{{ text_registered }}</span>{% endif %}
                 </td>
@@ -109,6 +110,7 @@
                   {{ cart.emails_sent }}
                   {% if cart.last_email_at %}<br/><span class="text-muted small">{{ cart.last_email_at }}</span>{% endif %}
                   {% if cart.coupon_code %}<br/><code>{{ cart.coupon_code }}</code>{% endif %}
+                  {% if cart.msg_status %}<br/><span class="badge {% if cart.msg_status == 'sent' %}bg-success{% else %}bg-secondary{% endif %}" title="{{ cart.last_msg_at }}">{{ text_msg_label }} {{ cart.msg_status }}</span>{% endif %}
                 </td>
                 <td>
                   {{ cart.created_at }}

@@ -51,20 +51,25 @@ class Repository {
 
 		$email = (string)($data['email'] ?? '');
 		$name  = (string)($data['customer_name'] ?? '');
+		$phone = (string)($data['phone'] ?? '');
 
 		if ($existing) {
-			// Never overwrite a known e-mail or name with an empty one.
+			// Never overwrite a known e-mail, name or phone with an empty one.
 			if ($email === '') {
 				$email = (string)$existing['email'];
 			}
 			if ($name === '') {
 				$name = (string)$existing['customer_name'];
 			}
+			if ($phone === '') {
+				$phone = (string)($existing['phone'] ?? '');
+			}
 
 			$sets = [
 				"`customer_id` = " . (int)($data['customer_id'] ?? 0),
 				"`email` = '" . $this->db->escape($email) . "'",
 				"`customer_name` = '" . $this->db->escape($name) . "'",
+				"`phone` = '" . $this->db->escape($phone) . "'",
 				"`cart_contents` = '" . $this->db->escape((string)($data['cart_contents'] ?? '')) . "'",
 				"`cart_total` = " . (float)($data['cart_total'] ?? 0),
 				"`currency_code` = '" . $this->db->escape((string)($data['currency_code'] ?? '')) . "'",
@@ -90,6 +95,7 @@ class Repository {
 			`customer_id` = " . (int)($data['customer_id'] ?? 0) . ",
 			`email` = '" . $this->db->escape($email) . "',
 			`customer_name` = '" . $this->db->escape($name) . "',
+			`phone` = '" . $this->db->escape($phone) . "',
 			`cart_contents` = '" . $this->db->escape((string)($data['cart_contents'] ?? '')) . "',
 			`cart_total` = " . (float)($data['cart_total'] ?? 0) . ",
 			`currency_code` = '" . $this->db->escape((string)($data['currency_code'] ?? '')) . "',
@@ -109,10 +115,10 @@ class Repository {
 	 * @param array<string,mixed> $fields Column => value. NULL writes SQL NULL.
 	 */
 	public function update(int $id, array $fields): void {
-		$strings = ['email', 'customer_name', 'cart_contents', 'currency_code', 'status', 'token_hash', 'coupon_code'];
-		$ints    = ['customer_id', 'item_count', 'emails_sent', 'coupon_id', 'recovered_order_id', 'language_id', 'store_id'];
+		$strings = ['email', 'customer_name', 'phone', 'cart_contents', 'currency_code', 'status', 'token_hash', 'msg_token_hash', 'msg_status', 'coupon_code'];
+		$ints    = ['customer_id', 'item_count', 'emails_sent', 'msg_sent', 'coupon_id', 'recovered_order_id', 'language_id', 'store_id'];
 		$floats  = ['cart_total', 'recovered_total'];
-		$dates   = ['token_expires_at', 'last_email_at', 'abandoned_at', 'recovered_at'];
+		$dates   = ['token_expires_at', 'last_email_at', 'last_msg_at', 'abandoned_at', 'recovered_at'];
 
 		$sets = ['`updated_at` = NOW()'];
 
@@ -190,7 +196,9 @@ class Repository {
 		if ($hash === '') {
 			return null;
 		}
-		$row = $this->db->query("SELECT * FROM `" . self::table() . "` WHERE `token_hash` = '" . $this->db->escape($hash) . "' LIMIT 1")->row;
+		// The e-mail and the Viber/SMS reminder carry different tokens, so a text
+		// sent later never invalidates the link in an earlier e-mail.
+		$row = $this->db->query("SELECT * FROM `" . self::table() . "` WHERE `token_hash` = '" . $this->db->escape($hash) . "' OR `msg_token_hash` = '" . $this->db->escape($hash) . "' LIMIT 1")->row;
 
 		return $row ?: null;
 	}
@@ -206,13 +214,13 @@ class Repository {
 
 	/**
 	 * Active carts idle for longer than $minutes — the scan promotes them to
-	 * "abandoned". Rows without an e-mail address can never be recovered, so
-	 * they are skipped.
+	 * "abandoned". Rows with neither an e-mail nor a phone can never be
+	 * recovered, so they are skipped.
 	 */
 	public function staleActive(int $minutes, int $limit = 200): array {
 		return $this->db->query("SELECT * FROM `" . self::table() . "`
 			WHERE `status` = '" . self::STATUS_ACTIVE . "'
-			  AND `email` <> ''
+			  AND (`email` <> '' OR `phone` <> '')
 			  AND `updated_at` < DATE_SUB(NOW(), INTERVAL " . max(1, $minutes) . " MINUTE)
 			ORDER BY `updated_at` ASC LIMIT " . max(1, $limit))->rows;
 	}
@@ -224,6 +232,31 @@ class Repository {
 			  AND `email` <> ''
 			  AND `emails_sent` < " . max(1, $maxStep) . "
 			ORDER BY `abandoned_at` ASC LIMIT " . max(1, $limit))->rows;
+	}
+
+	/** Abandoned carts with a phone that have not had their Viber/SMS reminder yet. */
+	public function pendingMessages(int $limit = 50): array {
+		return $this->db->query("SELECT * FROM `" . self::table() . "`
+			WHERE `status` = '" . self::STATUS_ABANDONED . "'
+			  AND `phone` <> ''
+			  AND `msg_sent` = 0
+			  AND `abandoned_at` IS NOT NULL
+			ORDER BY `abandoned_at` ASC LIMIT " . max(1, $limit))->rows;
+	}
+
+	/** Throttle for texts: was this number messaged within $days days? */
+	public function messagedRecently(string $phone, int $days, int $excludeId = 0): bool {
+		if ($days < 1 || $phone === '') {
+			return false;
+		}
+		$row = $this->db->query("SELECT `abandoned_cart_id` FROM `" . self::table() . "`
+			WHERE `phone` = '" . $this->db->escape($phone) . "'
+			  AND `abandoned_cart_id` <> " . $excludeId . "
+			  AND `last_msg_at` IS NOT NULL
+			  AND `last_msg_at` > DATE_SUB(NOW(), INTERVAL " . $days . " DAY)
+			LIMIT 1")->row;
+
+		return !empty($row);
 	}
 
 	/**
@@ -247,10 +280,13 @@ class Repository {
 	 * Open carts belonging to one buyer — flipped to "recovered" once an order
 	 * with the same e-mail or customer id arrives.
 	 */
-	public function openForCustomer(string $email, int $customerId): array {
+	public function openForCustomer(string $email, int $customerId, string $phone = ''): array {
 		$where = [];
 		if ($email !== '') {
 			$where[] = "`email` = '" . $this->db->escape($email) . "'";
+		}
+		if ($phone !== '') {
+			$where[] = "`phone` = '" . $this->db->escape($phone) . "'";
 		}
 		if ($customerId > 0) {
 			$where[] = "`customer_id` = " . $customerId;
@@ -335,7 +371,7 @@ class Repository {
 	/** Abandoned carts whose recovery window has closed become "lost". */
 	public function expireStale(int $days): void {
 		$this->db->query("UPDATE `" . self::table() . "`
-			SET `status` = '" . self::STATUS_LOST . "', `token_hash` = '', `token_expires_at` = NULL, `updated_at` = NOW()
+			SET `status` = '" . self::STATUS_LOST . "', `token_hash` = '', `msg_token_hash` = '', `token_expires_at` = NULL, `updated_at` = NOW()
 			WHERE `status` = '" . self::STATUS_ABANDONED . "'
 			  AND `abandoned_at` IS NOT NULL
 			  AND `abandoned_at` < DATE_SUB(NOW(), INTERVAL " . max(1, $days) . " DAY)");
@@ -374,10 +410,27 @@ class Repository {
 		return $token;
 	}
 
-	/** Burn a token once it has been used (or found expired). */
+	/**
+	 * Token for a Viber/SMS reminder — shorter than the e-mail one (24 hex
+	 * characters, 96 bits) because every character of an SMS costs money, and
+	 * stored in its own column so it does not revoke the e-mail link.
+	 */
+	public function issueMessageToken(int $id, int $lifetimeDays): string {
+		$token = bin2hex(random_bytes(12));
+
+		$this->db->query("UPDATE `" . self::table() . "`
+			SET `msg_token_hash` = '" . $this->db->escape(hash('sha256', $token)) . "',
+			    `token_expires_at` = DATE_ADD(NOW(), INTERVAL " . max(1, $lifetimeDays) . " DAY),
+			    `updated_at` = NOW()
+			WHERE `abandoned_cart_id` = " . $id);
+
+		return $token;
+	}
+
+	/** Burn both tokens once one has been used (or found expired). */
 	public function clearToken(int $id): void {
 		$this->db->query("UPDATE `" . self::table() . "`
-			SET `token_hash` = '', `token_expires_at` = NULL, `updated_at` = NOW()
+			SET `token_hash` = '', `msg_token_hash` = '', `token_expires_at` = NULL, `updated_at` = NOW()
 			WHERE `abandoned_cart_id` = " . $id);
 	}
 
@@ -390,6 +443,7 @@ class Repository {
 			`customer_id` INT(11) NOT NULL DEFAULT 0,
 			`email` VARCHAR(96) NOT NULL DEFAULT '',
 			`customer_name` VARCHAR(128) NOT NULL DEFAULT '',
+			`phone` VARCHAR(32) NOT NULL DEFAULT '',
 			`cart_contents` LONGTEXT NULL,
 			`cart_total` DECIMAL(15,4) NOT NULL DEFAULT 0,
 			`currency_code` VARCHAR(3) NOT NULL DEFAULT '',
@@ -400,6 +454,10 @@ class Repository {
 			`token_expires_at` DATETIME DEFAULT NULL,
 			`emails_sent` TINYINT(1) NOT NULL DEFAULT 0,
 			`last_email_at` DATETIME DEFAULT NULL,
+			`msg_token_hash` VARCHAR(64) NOT NULL DEFAULT '',
+			`msg_sent` TINYINT(1) NOT NULL DEFAULT 0,
+			`msg_status` VARCHAR(40) NOT NULL DEFAULT '',
+			`last_msg_at` DATETIME DEFAULT NULL,
 			`coupon_code` VARCHAR(64) NOT NULL DEFAULT '',
 			`coupon_id` INT(11) NOT NULL DEFAULT 0,
 			`recovered_order_id` INT(11) NOT NULL DEFAULT 0,
@@ -415,5 +473,40 @@ class Repository {
 			KEY `token_hash` (`token_hash`),
 			KEY `updated_at` (`updated_at`)
 		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;");
+
+		$this->ensureSchema();
+	}
+
+	/**
+	 * Add the 1.2.0 columns to a table created by an older version.
+	 *
+	 * ⚠ Replacing the extension files does not run install() again, and CREATE
+	 * TABLE IF NOT EXISTS never touches an existing table — without this every
+	 * query that mentions `phone` would fail on an upgraded shop. Cheap enough
+	 * to call from the cron and the settings page: one SHOW COLUMNS.
+	 */
+	public function ensureSchema(): void {
+		$have = [];
+		foreach ($this->db->query("SHOW COLUMNS FROM `" . self::table() . "`")->rows as $column) {
+			$have[(string)$column['Field']] = true;
+		}
+
+		$add = [
+			'phone'          => "VARCHAR(32) NOT NULL DEFAULT '' AFTER `customer_name`",
+			'msg_token_hash' => "VARCHAR(64) NOT NULL DEFAULT '' AFTER `last_email_at`",
+			'msg_sent'       => "TINYINT(1) NOT NULL DEFAULT 0 AFTER `msg_token_hash`",
+			'msg_status'     => "VARCHAR(40) NOT NULL DEFAULT '' AFTER `msg_sent`",
+			'last_msg_at'    => "DATETIME DEFAULT NULL AFTER `msg_status`",
+		];
+
+		foreach ($add as $name => $definition) {
+			if (!isset($have[$name])) {
+				$this->db->query("ALTER TABLE `" . self::table() . "` ADD `" . $name . "` " . $definition);
+			}
+		}
+
+		if (!isset($have['phone'])) {
+			$this->db->query("ALTER TABLE `" . self::table() . "` ADD KEY `phone` (`phone`)");
+		}
 	}
 }
