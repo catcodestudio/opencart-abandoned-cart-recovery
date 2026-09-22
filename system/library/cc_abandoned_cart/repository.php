@@ -80,9 +80,11 @@ class Repository {
 			];
 
 			// A shopper who is active again leaves the abandoned queue.
+			// abandoned_at stays: it is history ("abandoned at" in the list and
+			// the proof an order recovered this cart); a new abandonment
+			// overwrites it anyway.
 			if ((string)$existing['status'] === self::STATUS_ABANDONED) {
 				$sets[] = "`status` = '" . self::STATUS_ACTIVE . "'";
-				$sets[] = "`abandoned_at` = NULL";
 			}
 
 			$this->db->query("UPDATE `" . self::table() . "` SET " . implode(', ', $sets) . " WHERE `abandoned_cart_id` = " . (int)$existing['abandoned_cart_id']);
@@ -190,12 +192,13 @@ class Repository {
 	}
 
 	/**
-	 * Did this cart ever really get abandoned? A row that is active again
-	 * after the shopper came back keeps no abandoned_at, but a reminder that
+	 * Did this cart ever really get abandoned (and so can be "recovered")?
+	 * The shopper may be active again, but abandoned_at or a reminder that
 	 * went out is proof enough.
 	 */
 	public static function wasAbandoned(array $row): bool {
 		return (string)($row['status'] ?? '') === self::STATUS_ABANDONED
+			|| !empty($row['abandoned_at'])
 			|| (int)($row['emails_sent'] ?? 0) > 0
 			|| (int)($row['msg_sent'] ?? 0) > 0;
 	}
