@@ -4,6 +4,8 @@ $_['text_cart_restored']   = 'Welcome back — your cart has been restored.';
 $_['error_link_invalid']   = 'This recovery link is no longer valid.';
 $_['error_link_expired']   = 'This recovery link has expired.';
 $_['error_products_gone']  = 'Sorry, the products from that cart are no longer available.';
+$_['text_recover_wait']    = 'Restoring your cart…';
+$_['button_recover']       = 'Open my cart';
 
 // E-mail building blocks
 $_['text_customer_fallback'] = 'there';

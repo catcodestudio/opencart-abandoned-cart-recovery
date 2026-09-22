@@ -66,7 +66,10 @@ class Mailer {
 		$subject = strtr((string)$step['subject'], $replacements);
 		$body    = strtr((string)$step['body'], $replacements);
 
-		$sent = $this->dispatch($email, strip_tags($subject), $this->wrapHtml($body));
+		// The plain-text part is the template itself. Left empty, OpenCart
+		// derives it with strip_tags() from the HTML, which keeps every entity:
+		// the link read "…abandoned_cart.recover&amp;token=…" and did not work.
+		$sent = $this->dispatch($email, strip_tags($subject), $this->wrapHtml($body), $body);
 
 		if ($sent) {
 			$this->repository->update((int)$cart['abandoned_cart_id'], [
@@ -78,7 +81,7 @@ class Mailer {
 		return $sent;
 	}
 
-	private function dispatch(string $to, string $subject, string $html): bool {
+	private function dispatch(string $to, string $subject, string $html, string $text = ''): bool {
 		$config = $this->registry->get('config');
 
 		try {
@@ -108,6 +111,9 @@ class Mailer {
 			$mail->setSender(html_entity_decode((string)$config->get('config_name'), ENT_QUOTES, 'UTF-8'));
 			$mail->setSubject($subject);
 			$mail->setHtml($html);
+			if ($text !== '') {
+				$mail->setText($text);
+			}
 			$mail->send();
 
 			return true;

@@ -104,8 +104,8 @@ class Events extends \Opencart\System\Engine\Controller {
 	 *
 	 * args: [order_id, order_status_id, comment, notify]
 	 *
-	 * An order from the same address (or the same customer id) closes every
-	 * open cart of that shopper as "recovered".
+	 * An order from the same address (or customer id, or phone) marks one
+	 * abandoned cart of that shopper as "recovered" and closes the rest.
 	 */
 	public function orderHistoryAdded(string &$route, array &$args, &$output): void {
 		if (!$this->enabled()) {
@@ -131,28 +131,92 @@ class Events extends \Opencart\System\Engine\Controller {
 				return;
 			}
 
+			// Only the first status of an order decides. A later change (the
+			// payment callback, the manager moving it to "Complete" days after)
+			// must not touch the carts the same buyer has opened since.
+			$history = $this->db->query("SELECT COUNT(*) AS total FROM `" . DB_PREFIX . "order_history` WHERE `order_id` = " . $orderId)->row;
+			if ((int)($history['total'] ?? 0) > 1) {
+				return;
+			}
+
 			$repository = new Repository($this->db);
 
 			// order.total is the gross order value (product price + tax +
 			// shipping), so it is the figure to report as recovered revenue.
 			$recoveredTotal = round((float)($order['total'] ?? 0) * (float)($order['currency_value'] ?: 1), 4);
 
-			foreach ($repository->openForCustomer($email, $customerId, $phone) as $row) {
-				$repository->update((int)$row['abandoned_cart_id'], [
-					'status'             => Repository::STATUS_RECOVERED,
-					'recovered_order_id' => $orderId,
-					'recovered_total'    => $recoveredTotal,
-					'recovered_at'       => true,
-					'token_hash'         => '',
-					'msg_token_hash'     => '',
-					'token_expires_at'   => null,
-				]);
+			$capture = $this->capture();
+			$rows    = $repository->openForCustomer($email, $customerId, $phone);
+
+			// ⚠ One order recovers ONE cart. Closing every open row of the buyer
+			// as "recovered" counted the same purchase once per row (a shopper
+			// with an older cart, or the row a fresh session created, doubled
+			// the figures), and a plain purchase that was never abandoned was
+			// reported as recovered revenue. The credited row is the one of this
+			// session if it was really abandoned, otherwise the latest one that
+			// was.
+			$credit = $this->pickRecovered($rows, $capture->sessionKey());
+
+			foreach ($rows as $row) {
+				$id = (int)$row['abandoned_cart_id'];
+
+				if ($id === $credit) {
+					$repository->update($id, [
+						'status'             => Repository::STATUS_RECOVERED,
+						'recovered_order_id' => $orderId,
+						'recovered_total'    => $recoveredTotal,
+						'recovered_at'       => true,
+						'token_hash'         => '',
+						'msg_token_hash'     => '',
+						'token_expires_at'   => null,
+					]);
+				} elseif (!Repository::wasAbandoned($row)) {
+					// A live cart that simply turned into this order.
+					$repository->delete($id);
+				} else {
+					// An older abandoned cart of a buyer who has just ordered:
+					// stop reminding, do not count it as recovered.
+					$repository->update($id, [
+						'status'           => Repository::STATUS_LOST,
+						'token_hash'       => '',
+						'msg_token_hash'   => '',
+						'token_expires_at' => null,
+					]);
+				}
 			}
 
-			$this->capture()->forgetEmail();
+			$capture->forgetEmail();
 		} catch (\Throwable $e) {
 			// Ignore.
 		}
+	}
+
+	/**
+	 * Which of the buyer's open rows an order recovers: 0 when none of them was
+	 * ever abandoned (an ordinary purchase).
+	 */
+	private function pickRecovered(array $rows, string $sessionKey): int {
+		$best  = 0;
+		$score = null;
+
+		foreach ($rows as $row) {
+			if (!Repository::wasAbandoned($row)) {
+				continue;
+			}
+
+			$candidate = [
+				($sessionKey !== '' && (string)$row['session_key'] === $sessionKey) ? 1 : 0,
+				(string)$row['updated_at'],
+				(int)$row['abandoned_cart_id'],
+			];
+
+			if ($score === null || $candidate > $score) {
+				$score = $candidate;
+				$best  = (int)$row['abandoned_cart_id'];
+			}
+		}
+
+		return $best;
 	}
 
 	/**

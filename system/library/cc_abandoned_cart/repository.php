@@ -178,6 +178,28 @@ class Repository {
 			  AND c.`code` LIKE '" . $this->db->escape('BACK-%') . "'");
 	}
 
+	/**
+	 * Move a row to another session key (the recovery link re-attaches the
+	 * abandoned row to the shopper's new session).
+	 */
+	public function rekey(int $id, string $sessionKey): void {
+		if ($sessionKey === '') {
+			return;
+		}
+		$this->db->query("UPDATE `" . self::table() . "` SET `session_key` = '" . $this->db->escape(substr($sessionKey, 0, 64)) . "', `updated_at` = NOW() WHERE `abandoned_cart_id` = " . $id);
+	}
+
+	/**
+	 * Did this cart ever really get abandoned? A row that is active again
+	 * after the shopper came back keeps no abandoned_at, but a reminder that
+	 * went out is proof enough.
+	 */
+	public static function wasAbandoned(array $row): bool {
+		return (string)($row['status'] ?? '') === self::STATUS_ABANDONED
+			|| (int)($row['emails_sent'] ?? 0) > 0
+			|| (int)($row['msg_sent'] ?? 0) > 0;
+	}
+
 	/* ----------------------------------------------------------------- read */
 
 	public function findBySession(string $sessionKey): ?array {

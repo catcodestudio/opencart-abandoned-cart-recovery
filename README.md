@@ -42,6 +42,18 @@ The installer registers `abandoned_cart_scan` (hourly) and `abandoned_cart_clean
 
 `api.telegram.org`, and only when Telegram notifications are switched on.
 
+## Changelog
+
+### 1.2.2
+- The recovery link works when opened from a mail client or webmail. OpenCart 4 sends the session cookie with SameSite=Strict, so a link from another site restored the cart into a session the next page never saw ("cart is empty") and burned the one-time token. The link now opens a short page that re-submits the token from the shop's own origin.
+- A mail provider's link scanner fetching the URL no longer burns the token.
+- One order recovers one cart: the recovered row is re-attached to the shopper's new session instead of a second row being created, and an order no longer marks every open cart of the buyer as recovered, so "Recovered carts" and "Recovered revenue" count a purchase once. An ordinary purchase that was never abandoned is not reported as recovered.
+- Plain-text part of the reminder e-mail: the recovery link no longer contains `&amp;`.
+- Cart list: the filter is labelled "Status" instead of "Enabled".
+
+### 1.2.1
+- A purchased licence keeps Pro for good; the trial switches off after 7 days.
+
 ## Licence
 
 GPL-2.0-or-later. See https://www.gnu.org/licenses/gpl-2.0.html

@@ -52,7 +52,7 @@
           <input type="hidden" name="route" value="extension/abandoned_cart/module/abandoned_cart.carts"/>
           <input type="hidden" name="user_token" value="{{ user_token }}"/>
           <div class="col-sm-4">
-            <label class="form-label">{{ entry_status }}</label>
+            <label class="form-label">{{ column_status }}</label>
             <select name="filter_status" class="form-select">
               {% for option in status_filters %}
                 <option value="{{ option.value }}"{% if option.value == filter_status %} selected{% endif %}>{{ option.text }}</option>

@@ -21,8 +21,17 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 	 *
 	 * The token is the credential: only its SHA-256 hash is stored, the lookup
 	 * is a constant-time comparison, and the token is burned the moment it is
-	 * used. The address bar is cleaned by redirecting to the plain cart URL so
-	 * the token is never bookmarked or leaked through a referrer header.
+	 * used.
+	 *
+	 * ⚠ Two steps on purpose. The link is opened from a mail client or webmail,
+	 * i.e. from ANOTHER site, and OpenCart 4 issues OCSESSID with
+	 * SameSite=Strict: the browser does not send it on that request nor on any
+	 * redirect in the same chain. Restoring the cart there and answering 302
+	 * put the items into a session the next page never sees — "cart is empty"
+	 * and the one-time token already burned. So the GET only answers a tiny
+	 * page that re-submits the token by POST from our own origin; that request
+	 * carries the session cookie and does the actual work. Link scanners of
+	 * mail providers that merely fetch the URL no longer burn the token either.
 	 */
 	public function recover(): void {
 		$this->load->language('extension/abandoned_cart/abandoned_cart');
@@ -35,9 +44,16 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 			return;
 		}
 
-		$token = trim((string)($this->request->get['token'] ?? ''));
-		if ($token === '') {
+		$isPost = ($this->request->server['REQUEST_METHOD'] ?? 'GET') === 'POST';
+		$token  = trim((string)($isPost ? ($this->request->post['token'] ?? '') : ($this->request->get['token'] ?? '')));
+		if ($token === '' || !preg_match('/^[a-f0-9]{16,64}$/', $token)) {
 			$this->response->redirect($cartUrl);
+
+			return;
+		}
+
+		if (!$isPost) {
+			$this->bouncePage($token);
 
 			return;
 		}
@@ -71,12 +87,76 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 
 		if ($restored > 0) {
 			$this->adoptIdentity($row);
+			$this->attachToSession($repository, $row);
 			$this->session->data['success'] = $this->language->get('text_cart_restored');
 		} else {
 			$this->session->data['error'] = $this->language->get('error_products_gone');
 		}
 
 		$this->response->redirect($cartUrl);
+	}
+
+	/**
+	 * The intermediate page of the recovery link: posts the token back to
+	 * recover() from our own origin, so the session cookie travels with it.
+	 * A visible button covers browsers with scripts switched off.
+	 */
+	private function bouncePage(string $token): void {
+		// Relative on purpose: the form must post to exactly the origin (scheme
+		// included) the link was opened on.
+		$action = 'index.php?route=extension/abandoned_cart/abandoned_cart.recover';
+		$title  = htmlspecialchars((string)$this->language->get('text_recover_wait'), ENT_QUOTES, 'UTF-8');
+		$button = htmlspecialchars((string)$this->language->get('button_recover'), ENT_QUOTES, 'UTF-8');
+		$lang   = htmlspecialchars((string)$this->language->get('code'), ENT_QUOTES, 'UTF-8');
+
+		$this->response->addHeader('Content-Type: text/html; charset=utf-8');
+		$this->response->addHeader('X-Robots-Tag: noindex, nofollow');
+		$this->response->addHeader('Referrer-Policy: no-referrer');
+		$this->response->setOutput('<!DOCTYPE html><html lang="' . $lang . '"><head><meta charset="utf-8">'
+			. '<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow">'
+			. '<title>' . $title . '</title></head>'
+			. '<body style="font-family:Arial,Helvetica,sans-serif;text-align:center;padding:48px 16px;color:#23282d">'
+			. '<form id="cc-ac-recover" method="post" action="' . $action . '">'
+			. '<input type="hidden" name="token" value="' . htmlspecialchars($token, ENT_QUOTES, 'UTF-8') . '">'
+			. '<p>' . $title . '</p>'
+			. '<button type="submit" style="padding:10px 22px;font-size:15px;cursor:pointer">' . $button . '</button>'
+			. '</form>'
+			. '<script>document.getElementById("cc-ac-recover").submit();</script>'
+			. '</body></html>');
+	}
+
+	/**
+	 * Make the recovered row THE row of the current session.
+	 *
+	 * The shopper comes back with a new session, so the next cart snapshot
+	 * would be keyed differently and a second row appeared next to the
+	 * recovered one; the order then closed both and the statistics counted the
+	 * same purchase twice. Re-keying the original row keeps one cart, one row.
+	 */
+	private function attachToSession(Repository $repository, array $row): void {
+		try {
+			$key = (new Capture($this->registry, new Settings($this->config), $repository))->sessionKey();
+			$id  = (int)$row['abandoned_cart_id'];
+
+			if ($key === '' || $key === (string)$row['session_key']) {
+				return;
+			}
+
+			$other = $repository->findBySession($key);
+			if ($other && (int)$other['abandoned_cart_id'] !== $id) {
+				if ((string)$other['status'] === Repository::STATUS_ACTIVE && !Repository::wasAbandoned($other)) {
+					// The live cart was just replaced by the recovered one.
+					$repository->delete((int)$other['abandoned_cart_id']);
+				} else {
+					// History stays, it only stops answering to this session.
+					$repository->rekey((int)$other['abandoned_cart_id'], 'detached-' . (int)$other['abandoned_cart_id']);
+				}
+			}
+
+			$repository->rekey($id, $key);
+		} catch (\Throwable $e) {
+			// Never let bookkeeping break the recovery itself.
+		}
 	}
 
 	/**
