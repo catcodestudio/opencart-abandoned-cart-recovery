@@ -32,7 +32,7 @@ class License {
 	/** Canonical module slug — MUST match post_name of the module CPT. */
 	const EXPECTED_SLUG = 'opencart-abandoned-cart-recovery';
 
-	/** Free trial length in days. Paid licences are annual (1–5 years). */
+	/** Free trial length in days. */
 	const TRIAL_DAYS = 7;
 
 	/** Days the cached 'valid' stays authoritative while the server is down. */
@@ -115,14 +115,7 @@ class License {
 		return self::hasKey($registry) && $started > 0 && $expires > 0 && ($expires - $started) <= 8 * 86400;
 	}
 
-	/**
-	 * Are updates and support still covered?
-	 *
-	 * Separate from isPro() on purpose: after an annual term ends the module keeps
-	 * working, but the shop is no longer entitled to new versions. Saying so plainly
-	 * is what makes "the features stay" an honest promise rather than a reason never
-	 * to renew.
-	 */
+	/** Are updates and support still covered? */
 	public static function updatesActive(\Opencart\System\Engine\Registry $registry): bool {
 		if (self::isTrialKey($registry)) {
 			return self::trialDaysLeft($registry) > 0;
