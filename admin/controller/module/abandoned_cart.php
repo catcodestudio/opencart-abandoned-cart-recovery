@@ -1,6 +1,8 @@
 <?php
 namespace Opencart\Admin\Controller\Extension\AbandonedCart\Module;
 
+require_once dirname(__DIR__, 3) . '/system/library/cc_keep.php';
+
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/crypto.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/settings.php';
 require_once DIR_EXTENSION . 'abandoned_cart/system/library/cc_abandoned_cart/license.php';
@@ -19,6 +21,15 @@ use Opencart\System\Library\CcAbandonedCart\TurboSms;
  * Abandoned Cart Recovery — admin controller.
  */
 class AbandonedCart extends \Opencart\System\Engine\Controller {
+	public function __construct(\Opencart\System\Engine\Registry $registry) {
+		parent::__construct($registry);
+
+		// Any request to this screen may change the settings, and the core wipes them on uninstall.
+		if (strpos((string)($this->request->get['route'] ?? ''), 'extension/abandoned_cart/module/abandoned_cart') === 0) {
+			\CcSettingsKeep::mirrorAfter($this->db, 'module_abandoned_cart');
+		}
+	}
+
 
 	private string $route = 'extension/abandoned_cart/module/abandoned_cart';
 
@@ -746,6 +757,8 @@ class AbandonedCart extends \Opencart\System\Engine\Controller {
 	/* ------------------------------------------------------- install/uninstall */
 
 	public function install(): void {
+		\CcSettingsKeep::restoreAfter($this->db, 'module_abandoned_cart');
+
 		(new Repository($this->db))->install();
 
 		// ⚠ Installing enables nothing. Earlier builds started the 7-day Pro
