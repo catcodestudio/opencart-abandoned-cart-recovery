@@ -94,10 +94,10 @@ if (!class_exists('CcSettingsKeep', false)) {
 						continue;
 					}
 
-					$key = $db->escape((string)$row['key']);
-
-					$db->query("DELETE FROM `" . DB_PREFIX . "setting` WHERE `store_id` = '0' AND `code` = '" . $db->escape($code) . "' AND `key` = '" . $key . "'");
-					$db->query("INSERT INTO `" . DB_PREFIX . "setting` SET `store_id` = '0', `code` = '" . $db->escape($code) . "', `key` = '" . $key . "', `value` = '" . $db->escape((string)$row['value']) . "', `serialized` = '" . (int)($row['serialized'] ?? 0) . "'");
+					// escape() is called inside each query: the PDO driver of OpenCart 4.0.2 turns it into a
+					// placeholder that is valid for one statement only.
+					$db->query("DELETE FROM `" . DB_PREFIX . "setting` WHERE `store_id` = '0' AND `code` = '" . $db->escape($code) . "' AND `key` = '" . $db->escape((string)$row['key']) . "'");
+					$db->query("INSERT INTO `" . DB_PREFIX . "setting` SET `store_id` = '0', `code` = '" . $db->escape($code) . "', `key` = '" . $db->escape((string)$row['key']) . "', `value` = '" . $db->escape((string)$row['value']) . "', `serialized` = '" . (int)($row['serialized'] ?? 0) . "'");
 				}
 			} catch (\Throwable $e) {
 				// Nothing more can be done here; the module starts with its defaults.
