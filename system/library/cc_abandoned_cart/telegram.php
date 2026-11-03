@@ -160,7 +160,7 @@ class Telegram {
 		$body   = (string)curl_exec($ch);
 		$error  = (string)curl_error($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
+		if (PHP_VERSION_ID < 80000) { curl_close($ch); } // deprecated on 8.5, and OpenCart 4 turns any deprecation into a redirect
 
 		$decoded = json_decode($body, true);
 

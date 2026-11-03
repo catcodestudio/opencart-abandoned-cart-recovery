@@ -405,7 +405,7 @@ class License {
 		$raw  = curl_exec($ch);
 		$err  = curl_error($ch);
 		$http = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
+		if (PHP_VERSION_ID < 80000) { curl_close($ch); } // deprecated on 8.5, and OpenCart 4 turns any deprecation into a redirect
 
 		if ($raw === false) {
 			return ['ok' => false, 'error' => 'network', 'message' => $err, 'http' => 0];
