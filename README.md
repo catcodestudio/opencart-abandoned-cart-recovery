@@ -5,7 +5,7 @@ Records carts that never became an order and brings the shopper back with a remi
 - **`main`** — OpenCart 4.0.2 – 4.1.x (`abandoned_cart.ocmod.zip`)
 - **`opencart-3.x`** — OpenCart 3.0.2 – 3.0.5.0 (`abandoned-cart-oc3.ocmod.zip`)
 
-**Status:** v1.0.0 — both builds tested live (OpenCart 4.1.0.3 and 3.0.5.0): capture → cron marks the cart abandoned → reminder e-mail → restore link rebuilds the cart with the same total → admin statistics.
+**Status:** v1.2.4 — both builds tested live (OpenCart 4.1.0.3 and 3.0.5.0): capture → cron marks the cart abandoned → reminder e-mail → restore link rebuilds the cart with the same total → admin statistics.
 
 ## Features
 
@@ -43,6 +43,9 @@ The installer registers `abandoned_cart_scan` (hourly) and `abandoned_cart_clean
 `api.telegram.org`, and only when Telegram notifications are switched on.
 
 ## Changelog
+
+### 1.2.4
+- Guest carts are captured on one-page checkouts routed outside `checkout/*` (for example `extension/cc_onepage/checkout`): the e-mail a guest types there now saves the cart, so it can be reminded and recovered.
 
 ### 1.2.2
 - The recovery link works when opened from a mail client or webmail. OpenCart 4 sends the session cookie with SameSite=Strict, so a link from another site restored the cart into a session the next page never saw ("cart is empty") and burned the one-time token. The link now opens a short page that re-submits the token from the shop's own origin.

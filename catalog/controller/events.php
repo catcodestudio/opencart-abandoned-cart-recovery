@@ -274,7 +274,9 @@ class Events extends \Opencart\System\Engine\Controller {
 		$this->syncThrottled();
 
 		$current = (string)($this->request->get['route'] ?? '');
-		if (strpos($current, 'checkout/') !== 0) {
+		// checkout/* (core) and one-page checkouts routed elsewhere, e.g.
+		// extension/cc_onepage/checkout — the guest types the e-mail there too.
+		if (strpos($current, 'checkout') === false && strpos($current, 'onepage') === false) {
 			return;
 		}
 
